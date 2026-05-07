@@ -12,6 +12,8 @@ Use this page to help users choose a voice setup.
 | Private/offline testing | faster-whisper | pyttsx3 | local execution, no network calls |
 | Production Telegram bot | OpenAI-compatible STT | ElevenLabs | simpler quality bar and Telegram-friendly audio output |
 | Lowest operational complexity | OpenAI-compatible STT | ElevenLabs | hosted providers own model/runtime reliability |
+| Existing Z.ai account | OpenAI-compatible or local STT | Z.ai GLM-TTS after adapter support lands | Z.ai is useful for GLM voice output, but not wired yet |
+| Existing MiniMax account | OpenAI-compatible or local STT | MiniMax Speech after adapter support lands | MiniMax is useful for expressive voice, but not wired yet |
 
 ## Free / Local Options
 
@@ -103,3 +105,35 @@ Tradeoffs:
 - provider spend
 - provider account setup
 - users must keep credentials out of Telegram chat and git
+
+## Planned Provider Adapters
+
+These providers should be configured with explicit adapters, not by pretending they are OpenAI-compatible transcription providers.
+
+### Z.ai / GLM
+
+Z.ai is the provider; GLM is the model family. The intended first voice path is GLM-TTS.
+
+Planned env shape:
+
+```text
+VOICE_TTS_PROVIDER=zai
+ZAI_API_KEY=<your Z.ai API key>
+VOICE_TTS_ZAI_MODEL=glm-tts
+VOICE_TTS_ZAI_VOICE=<your Z.ai voice id or name>
+```
+
+### MiniMax
+
+MiniMax is a strong hosted TTS candidate for expressive Spark character voices.
+
+Planned env shape:
+
+```text
+VOICE_TTS_PROVIDER=minimax
+MINIMAX_API_KEY=<your MiniMax API key>
+VOICE_TTS_MINIMAX_MODEL=speech-2.8-hd
+VOICE_TTS_MINIMAX_VOICE_ID=<your MiniMax voice id>
+```
+
+Until those adapters land, use OpenAI-compatible or local STT plus ElevenLabs or pyttsx3 TTS.

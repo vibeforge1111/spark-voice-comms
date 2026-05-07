@@ -30,6 +30,12 @@ This file tracks which providers are actually safe to use for `spark-voice-comms
 
 - `anthropic`
   - reason: no compatible `/audio/transcriptions` path in the current hook contract
+- `zai`
+  - provider: Z.ai
+  - common model family: GLM
+  - reason: current STT hook has no verified Z.ai transcription adapter
+- `minimax`
+  - reason: current STT hook has no verified MiniMax transcription adapter
 - OAuth-only runtimes
   - reason: current hook expects env-backed API key transport for STT
 
@@ -64,7 +70,12 @@ This file tracks which providers are actually safe to use for `spark-voice-comms
 
 ### Not Implemented Yet
 
+- `zai`
+  - provider: Z.ai
+  - useful target: GLM-TTS via a dedicated adapter
+  - policy: do not route through the generic OpenAI transcription contract
 - `minimax`
+  - useful target: MiniMax Speech 2.x / 2.8 via a dedicated adapter
   - useful existing Spark voice mappings already exist
 - `browser_speechsynthesis`
   - should remain a non-Telegram fallback for local/browser surfaces, not the main Telegram voice path

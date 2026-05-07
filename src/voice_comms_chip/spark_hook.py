@@ -50,7 +50,9 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     if status["ready"]:
         lines.append("Next: send a Telegram voice note and I will route it through this chip.")
     else:
-        lines.append("Next: attach and activate `spark-voice-comms`, then finish provider setup for voice transcription.")
+        lines.append(
+            "Next: finish provider setup for voice transcription, then rerun `/voice`."
+        )
     return {
         "returncode": 0,
         "stdout": status["reason"],
@@ -71,7 +73,7 @@ def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
         "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
         "2. route the transcript through the same Builder Telegram runtime and saved persona.\n"
         f"3. add optional voice reply synthesis around the canonical `{profile_summary['profile_name']}` voice profile without bloating Builder.\n"
-        "Next: attach the chip, validate `voice.status`, then dogfood real Telegram voice notes."
+        "Next: validate `voice.status`, then dogfood real Telegram voice notes."
     )
     return {
         "returncode": 0,
@@ -93,25 +95,28 @@ def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
 def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = _build_onboarding_snapshot(payload)
     route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
+    provider_note = _voice_provider_note(payload)
     if route in {"free", "local", "offline"}:
         recommended_path = "local_free"
-        next_step = "Install `faster-whisper` for local STT and `pyttsx3` for local TTS, then run `voice.onboard` again."
+        recommendation = _local_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
     elif route in {"paid", "production", "hosted"}:
         recommended_path = "paid_provider"
-        next_step = "Add OpenAI STT and ElevenLabs TTS env refs, then verify `voice.status` and one `voice.speak` dry run."
+        recommendation = _paid_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
     else:
         recommended_path = "guided_choice"
-        next_step = "Choose `local_free` for zero-cost local testing or `paid_provider` for higher quality hosted voice."
+        recommendation = _guided_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
     reply_text = "\n".join(
         [
             "Spark voice onboarding",
-            f"- Recommended path: {recommended_path}",
+            recommendation,
+            "",
+            "What I can see right now:",
             f"- Local STT: {snapshot['local_stt']['status']}",
             f"- Local TTS: {snapshot['local_tts']['status']}",
             f"- Paid STT: {snapshot['paid_stt']['status']}",
             f"- Paid TTS: {snapshot['paid_tts']['status']}",
-            f"- Next: {next_step}",
-            "Ask me: `voice onboard local`, `voice onboard paid`, or `voice status`.",
+            "",
+            _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
         ]
     )
     return {
@@ -125,8 +130,9 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             "reply_text": reply_text,
             "recommended_path": recommended_path,
-            "next_step": next_step,
+            "next_step": _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
             "snapshot": snapshot,
+            "provider_note": provider_note,
             "agent_prompts": [
                 "voice onboard local",
                 "voice onboard paid",
@@ -135,6 +141,107 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
             ],
         },
     }
+
+
+def _voice_provider_note(payload: dict[str, Any]) -> dict[str, str]:
+    provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+    provider_id = str(provider.get("provider_id") or "").strip().lower()
+    provider_kind = str(provider.get("provider_kind") or "").strip().lower()
+    base_url = str(provider.get("base_url") or "").strip().lower()
+    default_model = str(provider.get("default_model") or "").strip()
+    label = provider_id or provider_kind or "unknown"
+    if provider_kind == "minimax" or provider_id == "minimax":
+        return {
+            "provider": "minimax",
+            "label": "MiniMax",
+            "note": (
+                "I can see a MiniMax-flavored runtime, so I would treat MiniMax as a strong future "
+                "TTS option for characterful replies. The current voice chip still needs a dedicated "
+                "MiniMax speech adapter before I call it ready."
+            ),
+        }
+    if provider_id in {"zai", "z.ai", "glm"} or "bigmodel" in base_url or "zhipu" in base_url:
+        return {
+            "provider": "zai",
+            "label": "Z.ai",
+            "note": (
+                "I can see a Z.ai/GLM-shaped runtime, so GLM-TTS is a natural future fit. "
+                "Today I would pair this with local or OpenAI-compatible STT until the Z.ai voice adapter lands."
+            ),
+        }
+    if provider_kind == "openai" or provider_id == "openai":
+        return {
+            "provider": "openai",
+            "label": "OpenAI-compatible",
+            "note": "Your active provider shape is already the easiest path for hosted transcription.",
+        }
+    if label != "unknown":
+        model_part = f" ({default_model})" if default_model else ""
+        return {
+            "provider": label,
+            "label": f"{label}{model_part}",
+            "note": (
+                f"I can see `{label}` as the active runtime provider. I will not assume it can do voice "
+                "unless its STT/TTS endpoint has been verified."
+            ),
+        }
+    return {
+        "provider": "unknown",
+        "label": "unknown",
+        "note": "I do not have enough provider evidence to personalize the hosted path yet.",
+    }
+
+
+def _local_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
+    if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+        lead = "For this Spark, I would start local: the private/free path is already in reach."
+    elif snapshot["local_stt"]["ready"]:
+        lead = "For this Spark, I would still lean local first: transcription is already local-ready, and TTS is the missing piece."
+    else:
+        lead = "For local voice, I would build the private/free path first and keep hosted providers optional."
+    return (
+        f"{lead}\n"
+        f"{provider_note['note']}\n"
+        "No API keys belong in Telegram; local setup should happen through the machine or Spark's secret layer."
+    )
+
+
+def _paid_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
+    if provider_note["provider"] == "minimax":
+        lead = "For high-quality paid voice, MiniMax is worth supporting, but I would not mark it ready until the speech adapter is real."
+    elif provider_note["provider"] == "zai":
+        lead = "For a Z.ai/GLM-centered Spark, I would keep GLM-TTS on the roadmap and use a verified voice path today."
+    elif snapshot["paid_stt"]["ready"] or snapshot["paid_tts"]["ready"]:
+        lead = "For paid voice, I would build on the hosted pieces already visible instead of starting from scratch."
+    else:
+        lead = "For paid voice, I would optimize for reliable Telegram delivery first, then voice character."
+    return (
+        f"{lead}\n"
+        f"{provider_note['note']}\n"
+        "My default recommendation today is OpenAI-compatible STT plus ElevenLabs TTS, with MiniMax and Z.ai as explicit adapters rather than guesses."
+    )
+
+
+def _guided_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
+    if snapshot["local_stt"]["ready"] and not snapshot["paid_tts"]["ready"]:
+        lead = "Given what I can see, I would start with local input and add premium voice output later."
+    elif snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
+        lead = "Given what I can see, the paid/provider path is closest to a polished Telegram experience."
+    else:
+        lead = "I would choose the path based on what the user values most: privacy and zero spend, or premium voice quality."
+    return f"{lead}\n{provider_note['note']}"
+
+
+def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
+    if recommended_path == "local_free":
+        if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+            return "Next: run one local voice smoke, then send a short Telegram voice note."
+        return "Next: install the missing local voice package, then rerun `/voice onboard local`."
+    if recommended_path == "paid_provider":
+        if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
+            return "Next: verify `/voice status`, then run one `voice.speak` dry run."
+        return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram."
+    return "Next: tell me whether you care more about local/private or highest-quality voice, and I will recommend the setup."
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:

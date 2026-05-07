@@ -35,7 +35,10 @@
     ],
     "example_intents": [
       "Reply in voice.",
-      "Transcribe this voice note."
+      "Transcribe this voice note.",
+      "Help me set up voice.",
+      "Can I use free local TTS?",
+      "Set up paid voice."
     ],
     "limitations": [
       "Installing this chip does not activate voice by itself; the host Spark runtime must approve and route voice.",

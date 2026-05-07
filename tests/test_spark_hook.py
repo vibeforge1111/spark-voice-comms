@@ -131,7 +131,8 @@ def test_voice_onboard_guides_local_free_path():
     assert result["returncode"] == 0
     assert result["result"]["recommended_path"] == "local_free"
     assert result["metrics"]["local_ready"] == 1
-    assert "voice onboard local" in result["result"]["reply_text"]
+    assert "private/free path" in result["result"]["reply_text"]
+    assert "local voice smoke" in result["result"]["reply_text"]
 
 
 def test_voice_onboard_reports_paid_provider_readiness(tmp_path):
