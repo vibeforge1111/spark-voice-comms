@@ -96,15 +96,28 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot = _build_onboarding_snapshot(payload)
     route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
     provider_note = _voice_provider_note(payload)
+    preference_note = _voice_preference_note(payload)
     if route in {"free", "local", "offline"}:
         recommended_path = "local_free"
-        recommendation = _local_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
+        recommendation = _local_voice_recommendation(
+            snapshot=snapshot,
+            provider_note=provider_note,
+            preference_note=preference_note,
+        )
     elif route in {"paid", "production", "hosted"}:
         recommended_path = "paid_provider"
-        recommendation = _paid_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
+        recommendation = _paid_voice_recommendation(
+            snapshot=snapshot,
+            provider_note=provider_note,
+            preference_note=preference_note,
+        )
     else:
         recommended_path = "guided_choice"
-        recommendation = _guided_voice_recommendation(snapshot=snapshot, provider_note=provider_note)
+        recommendation = _guided_voice_recommendation(
+            snapshot=snapshot,
+            provider_note=provider_note,
+            preference_note=preference_note,
+        )
     reply_text = "\n".join(
         [
             "Spark voice onboarding",
@@ -133,6 +146,7 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "next_step": _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
             "snapshot": snapshot,
             "provider_note": provider_note,
+            "preference_note": preference_note,
             "agent_prompts": [
                 "voice onboard local",
                 "voice onboard paid",
@@ -140,6 +154,34 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 "voice plan",
             ],
         },
+    }
+
+
+def _voice_preference_note(payload: dict[str, Any]) -> dict[str, str]:
+    advisor_context = payload.get("advisor_context") if isinstance(payload.get("advisor_context"), dict) else {}
+    preferences = advisor_context.get("preferences") if isinstance(advisor_context.get("preferences"), list) else []
+    normalized: list[dict[str, str]] = []
+    for item in preferences:
+        if not isinstance(item, dict):
+            continue
+        value = " ".join(str(item.get("value") or item.get("summary") or "").split())
+        source = " ".join(str(item.get("source") or item.get("source_kind") or "").split())
+        if value:
+            normalized.append({"value": value, "source": source or "source-labeled context"})
+    joined = " ".join(item["value"].lower() for item in normalized[:5])
+    if any(token in joined for token in ("local", "offline", "privacy", "private", "open source", "self host")):
+        return {
+            "preference": "local",
+            "note": "I can see source-labeled preference context leaning local/private, so I would weight the free local path higher.",
+        }
+    if any(token in joined for token in ("quality", "premium", "natural voice", "paid", "elevenlabs", "minimax")):
+        return {
+            "preference": "paid_quality",
+            "note": "I can see source-labeled preference context leaning toward higher voice quality, so I would weight the paid TTS path higher.",
+        }
+    return {
+        "preference": "unknown",
+        "note": "",
     }
 
 
@@ -192,21 +234,33 @@ def _voice_provider_note(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _local_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
+def _local_voice_recommendation(
+    *,
+    snapshot: dict[str, Any],
+    provider_note: dict[str, str],
+    preference_note: dict[str, str],
+) -> str:
     if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
         lead = "For this Spark, I would start local: the private/free path is already in reach."
     elif snapshot["local_stt"]["ready"]:
         lead = "For this Spark, I would still lean local first: transcription is already local-ready, and TTS is the missing piece."
     else:
         lead = "For local voice, I would build the private/free path first and keep hosted providers optional."
+    preference_line = f"\n{preference_note['note']}" if preference_note.get("note") else ""
     return (
         f"{lead}\n"
         f"{provider_note['note']}\n"
         "No API keys belong in Telegram; local setup should happen through the machine or Spark's secret layer."
+        f"{preference_line}"
     )
 
 
-def _paid_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
+def _paid_voice_recommendation(
+    *,
+    snapshot: dict[str, Any],
+    provider_note: dict[str, str],
+    preference_note: dict[str, str],
+) -> str:
     if provider_note["provider"] == "minimax":
         lead = "For high-quality paid voice, MiniMax is worth supporting, but I would not mark it ready until the speech adapter is real."
     elif provider_note["provider"] == "zai":
@@ -219,11 +273,21 @@ def _paid_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[
         f"{lead}\n"
         f"{provider_note['note']}\n"
         "My default recommendation today is OpenAI-compatible STT plus ElevenLabs TTS, with MiniMax and Z.ai as explicit adapters rather than guesses."
+        + (f"\n{preference_note['note']}" if preference_note.get("note") else "")
     )
 
 
-def _guided_voice_recommendation(*, snapshot: dict[str, Any], provider_note: dict[str, str]) -> str:
-    if snapshot["local_stt"]["ready"] and not snapshot["paid_tts"]["ready"]:
+def _guided_voice_recommendation(
+    *,
+    snapshot: dict[str, Any],
+    provider_note: dict[str, str],
+    preference_note: dict[str, str],
+) -> str:
+    if preference_note.get("preference") == "local":
+        lead = "Because the available preference context leans local/private, I would start with the local path."
+    elif preference_note.get("preference") == "paid_quality":
+        lead = "Because the available preference context leans quality-first, I would plan a paid TTS path after STT is verified."
+    elif snapshot["local_stt"]["ready"] and not snapshot["paid_tts"]["ready"]:
         lead = "Given what I can see, I would start with local input and add premium voice output later."
     elif snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
         lead = "Given what I can see, the paid/provider path is closest to a polished Telegram experience."

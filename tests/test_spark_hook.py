@@ -135,6 +135,25 @@ def test_voice_onboard_guides_local_free_path():
     assert "local voice smoke" in result["result"]["reply_text"]
 
 
+def test_voice_onboard_uses_source_labeled_local_preference():
+    result = handle_voice_onboard_hook(
+        {
+            "advisor_context": {
+                "preferences": [
+                    {
+                        "value": "User prefers local/private tooling when quality is good enough.",
+                        "source": "governed_current_state_memory",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert result["returncode"] == 0
+    assert result["result"]["preference_note"]["preference"] == "local"
+    assert "preference context leans local/private" in result["result"]["reply_text"]
+
+
 def test_voice_onboard_reports_paid_provider_readiness(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(
