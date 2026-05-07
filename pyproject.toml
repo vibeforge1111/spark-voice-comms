@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spark-voice-comms"
+version = "0.1.0"
+description = "Modular voice communications hooks for Spark agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+keywords = ["spark", "voice", "speech-to-text", "text-to-speech", "telegram"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+local-tts = ["pyttsx3>=2.90"]
+local-stt = ["faster-whisper>=1.0"]
+local = ["pyttsx3>=2.90", "faster-whisper>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["voice_comms_chip*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

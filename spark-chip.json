@@ -1,0 +1,47 @@
+{
+  "schema_version": "spark-chip.v1",
+  "io_protocol": "spark-hook-io.v1",
+  "chip_name": "spark-voice-comms",
+  "domain": "voice-communications",
+  "version": "0.1.0",
+  "description": "Modular voice communications hooks for Spark Intelligence Builder.",
+  "capabilities": ["voice.status", "voice.plan", "voice.onboard", "voice.transcribe", "voice.speak"],
+  "commands": {
+    "voice.status": ["python", "-m", "voice_comms_chip.spark_hook", "voice.status"],
+    "voice.plan": ["python", "-m", "voice_comms_chip.spark_hook", "voice.plan"],
+    "voice.onboard": ["python", "-m", "voice_comms_chip.spark_hook", "voice.onboard"],
+    "voice.transcribe": ["python", "-m", "voice_comms_chip.spark_hook", "voice.transcribe"],
+    "voice.speak": ["python", "-m", "voice_comms_chip.spark_hook", "voice.speak"]
+  },
+  "onboarding": {
+    "role": "Speech I/O runtime for transcribing inbound audio and synthesizing spoken replies for Spark.",
+    "surfaces": [
+      "telegram",
+      "cli",
+      "researcher_bridge"
+    ],
+    "permissions": [
+      "audio_io",
+      "stt_provider",
+      "tts_provider"
+    ],
+    "harnesses": [
+      "voice.io"
+    ],
+    "health_checks": [
+      "voice.status",
+      "voice.onboard",
+      "voice.plan"
+    ],
+    "example_intents": [
+      "Reply in voice.",
+      "Transcribe this voice note."
+    ],
+    "limitations": [
+      "Installing this chip does not activate voice by itself; the host Spark runtime must approve and route voice.",
+      "Provider keys and voice ids must come from local config or hook payloads, not the public repo.",
+      "Quality depends on STT/TTS provider health and channel delivery behavior.",
+      "Voice delivery still inherits Telegram and provider-specific media constraints."
+    ]
+  }
+}

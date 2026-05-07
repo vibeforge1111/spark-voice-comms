@@ -1,0 +1,8 @@
+{
+  "text": "Voice setup smoke test.",
+  "tts": {
+    "provider_id": "pyttsx3",
+    "rate": 175,
+    "volume": 0.9
+  }
+}

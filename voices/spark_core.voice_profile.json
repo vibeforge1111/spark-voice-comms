@@ -1,0 +1,40 @@
+{
+  "profile_name": "spark_core",
+  "tone": {
+    "identity": "calm_confident_concise",
+    "warmth": 0.65,
+    "energy": 0.55,
+    "formality": 0.45
+  },
+  "speech": {
+    "default_rate": 1.0,
+    "allowed_rates": [0.9, 1.0, 1.1],
+    "default_pitch": 1.0,
+    "default_emotion": "calm"
+  },
+  "provider_voices": {
+    "elevenlabs": {
+      "primary_voice_name": "Elise - Warm, Natural and Engaging",
+      "primary_voice_id": "",
+      "model_id": "eleven_turbo_v2_5"
+    },
+    "minimax": {
+      "primary": "presenter_male",
+      "fallback": "male-qn-qingse"
+    },
+    "browser_speechsynthesis": {
+      "preferred_voice_names": [
+        "Microsoft David Desktop",
+        "Microsoft Guy Online (Natural)",
+        "Google US English",
+        "Samantha"
+      ]
+    }
+  },
+  "interaction": {
+    "barge_in_enabled": true,
+    "tts_muted_default": false,
+    "streaming_reply_default": true
+  },
+  "notes": "Canonical Spark voice profile for Builder, Telegram, desktop, and future voice reply surfaces."
+}

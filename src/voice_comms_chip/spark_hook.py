@@ -1,0 +1,907 @@
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import importlib
+import importlib.util
+import json
+import os
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from uuid import uuid4
+from typing import Any
+
+from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
+
+DEFAULT_TRANSCRIPTION_MODEL = "whisper-1"
+SUPPORTED_PROVIDER_KINDS = {"openai", "custom"}
+SUPPORTED_FALLBACK_MODES = {"deterministic"}
+DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_TTS_PROVIDER = "elevenlabs"
+LOCAL_TTS_PROVIDER = "pyttsx3"
+DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
+DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
+DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
+DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64"
+ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
+ENV_TTS_MODEL_ID = "VOICE_TTS_ELEVENLABS_MODEL_ID"
+ENV_TTS_VOICE_ID = "VOICE_TTS_ELEVENLABS_VOICE_ID"
+ENV_TTS_VOICE_NAME = "VOICE_TTS_ELEVENLABS_VOICE_NAME"
+ENV_LOCAL_TTS_VOICE_NAME = "VOICE_TTS_LOCAL_VOICE_NAME"
+ENV_LOCAL_TTS_RATE = "VOICE_TTS_LOCAL_RATE"
+ENV_LOCAL_TTS_VOLUME = "VOICE_TTS_LOCAL_VOLUME"
+
+
+def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    status = _build_voice_status(payload)
+    profile_summary = summarize_voice_profile(load_voice_profile())
+    lines = [
+        "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
+        f"Current state: {status['reason']}",
+        (
+            f"Voice profile: {profile_summary['profile_name']} "
+            f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
+        ),
+    ]
+    if status["ready"]:
+        lines.append("Next: send a Telegram voice note and I will route it through this chip.")
+    else:
+        lines.append("Next: attach and activate `spark-voice-comms`, then finish provider setup for voice transcription.")
+    return {
+        "returncode": 0,
+        "stdout": status["reason"],
+        "stderr": "",
+        "metrics": {"ready": 1 if status["ready"] else 0},
+        "result": {
+            **status,
+            "voice_profile": profile_summary,
+            "reply_text": "\n".join(lines),
+        },
+    }
+
+
+def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    profile_summary = summarize_voice_profile(load_voice_profile())
+    reply_text = (
+        "Telegram voice plan:\n"
+        "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
+        "2. route the transcript through the same Builder Telegram runtime and saved persona.\n"
+        f"3. add optional voice reply synthesis around the canonical `{profile_summary['profile_name']}` voice profile without bloating Builder.\n"
+        "Next: attach the chip, validate `voice.status`, then dogfood real Telegram voice notes."
+    )
+    return {
+        "returncode": 0,
+        "stdout": "voice plan ready",
+        "stderr": "",
+        "metrics": {"plan_steps": 3},
+        "result": {
+            "reply_text": reply_text,
+            "voice_profile": profile_summary,
+            "steps": [
+                "transcribe Telegram voice/audio through spark-voice-comms",
+                "route the transcript through the same Builder Telegram runtime and saved persona",
+                "add optional voice reply synthesis as a second hook around the canonical voice profile",
+            ],
+        },
+    }
+
+
+def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _build_onboarding_snapshot(payload)
+    route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
+    if route in {"free", "local", "offline"}:
+        recommended_path = "local_free"
+        next_step = "Install `faster-whisper` for local STT and `pyttsx3` for local TTS, then run `voice.onboard` again."
+    elif route in {"paid", "production", "hosted"}:
+        recommended_path = "paid_provider"
+        next_step = "Add OpenAI STT and ElevenLabs TTS env refs, then verify `voice.status` and one `voice.speak` dry run."
+    else:
+        recommended_path = "guided_choice"
+        next_step = "Choose `local_free` for zero-cost local testing or `paid_provider` for higher quality hosted voice."
+    reply_text = "\n".join(
+        [
+            "Spark voice onboarding",
+            f"- Recommended path: {recommended_path}",
+            f"- Local STT: {snapshot['local_stt']['status']}",
+            f"- Local TTS: {snapshot['local_tts']['status']}",
+            f"- Paid STT: {snapshot['paid_stt']['status']}",
+            f"- Paid TTS: {snapshot['paid_tts']['status']}",
+            f"- Next: {next_step}",
+            "Ask me: `voice onboard local`, `voice onboard paid`, or `voice status`.",
+        ]
+    )
+    return {
+        "returncode": 0,
+        "stdout": recommended_path,
+        "stderr": "",
+        "metrics": {
+            "local_ready": 1 if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"] else 0,
+            "paid_ready": 1 if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"] else 0,
+        },
+        "result": {
+            "reply_text": reply_text,
+            "recommended_path": recommended_path,
+            "next_step": next_step,
+            "snapshot": snapshot,
+            "agent_prompts": [
+                "voice onboard local",
+                "voice onboard paid",
+                "voice status",
+                "voice plan",
+            ],
+        },
+    }
+
+
+def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    profile = load_voice_profile()
+    profile_summary = summarize_voice_profile(profile)
+    request = _resolve_tts_request(payload, profile=profile)
+    if request["provider_id"] == LOCAL_TTS_PROVIDER:
+        audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
+    else:
+        audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+    return {
+        "returncode": 0,
+        "stdout": f"{request['provider_id']}:{resolved_voice_id}",
+        "stderr": "",
+        "metrics": {
+            "audio_bytes": len(audio_bytes),
+            "text_characters": len(request["text"]),
+        },
+        "result": {
+            "provider_id": request["provider_id"],
+            "voice_id": resolved_voice_id,
+            "model_id": request["model_id"],
+            "mime_type": request["mime_type"],
+            "filename": f"voice-reply-{uuid4().hex[:8]}{request['file_extension']}",
+            "voice_compatible": bool(request["voice_compatible"]),
+            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+            "voice_profile": profile_summary,
+        },
+    }
+
+
+def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    audio_base64 = str(payload.get("audio_base64") or "").strip()
+    if not audio_base64:
+        raise ValueError("voice.transcribe requires audio_base64.")
+    audio_bytes = base64.b64decode(audio_base64.encode("ascii"))
+    filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
+    mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
+    fallback_mode = _resolve_fallback_mode(payload)
+    try:
+        provider = _resolve_provider(payload)
+        transcript_text = _transcribe_with_provider(
+            provider=provider,
+            audio_bytes=audio_bytes,
+            filename=filename,
+            mime_type=mime_type,
+        )
+    except Exception as exc:
+        if fallback_mode == "deterministic":
+            transcript_text = _build_deterministic_fallback_transcript(
+                audio_bytes=audio_bytes,
+                filename=filename,
+                reason=str(exc),
+            )
+            return {
+                "returncode": 0,
+                "stdout": transcript_text,
+                "stderr": "",
+                "metrics": {
+                    "transcript_characters": len(transcript_text),
+                    "audio_bytes": len(audio_bytes),
+                    "fallback_used": 1,
+                },
+                "result": {
+                    "transcript_text": transcript_text,
+                    "provider_id": "deterministic_fallback",
+                    "model": "deterministic_fallback",
+                    "mode": "deterministic_fallback",
+                    "fallback_reason": str(exc),
+                },
+            }
+        if _local_faster_whisper_available():
+            transcript_text = _transcribe_with_local_faster_whisper(
+                payload=payload,
+                audio_bytes=audio_bytes,
+                filename=filename,
+            )
+            return {
+                "returncode": 0,
+                "stdout": transcript_text,
+                "stderr": "",
+                "metrics": {
+                    "transcript_characters": len(transcript_text),
+                    "audio_bytes": len(audio_bytes),
+                    "fallback_used": 1,
+                },
+                "result": {
+                    "transcript_text": transcript_text,
+                    "provider_id": "local_faster_whisper",
+                    "model": _resolve_local_faster_whisper_model(payload),
+                    "mode": "local_faster_whisper",
+                    "fallback_reason": str(exc),
+                },
+            }
+        raise
+    return {
+        "returncode": 0,
+        "stdout": transcript_text,
+        "stderr": "",
+        "metrics": {
+            "transcript_characters": len(transcript_text),
+            "audio_bytes": len(audio_bytes),
+        },
+        "result": {
+            "transcript_text": transcript_text,
+            "provider_id": provider["provider_id"],
+            "model": DEFAULT_TRANSCRIPTION_MODEL,
+            "mode": "provider",
+        },
+    }
+
+
+def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        provider = _resolve_provider(payload)
+    except Exception as exc:
+        return {
+            "ready": False,
+            "reason": str(exc),
+            "provider_id": None,
+            "provider_kind": None,
+            "model": None,
+        }
+    if provider["provider_kind"] == "custom":
+        return {
+            "ready": False,
+            "reason": (
+                "custom provider transcription compatibility is not verified yet. "
+                "This chip expects an OpenAI-compatible `/audio/transcriptions` endpoint."
+            ),
+            "provider_id": provider["provider_id"],
+            "provider_kind": provider["provider_kind"],
+            "model": DEFAULT_TRANSCRIPTION_MODEL,
+        }
+    return {
+        "ready": True,
+        "reason": (
+            f"transcription is configured via {provider['provider_id']} "
+            f"using model {DEFAULT_TRANSCRIPTION_MODEL}"
+            + (" with local faster-whisper fallback available" if _local_faster_whisper_available() else "")
+        ),
+        "provider_id": provider["provider_id"],
+        "provider_kind": provider["provider_kind"],
+        "model": DEFAULT_TRANSCRIPTION_MODEL,
+    }
+
+
+def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    env_map: dict[str, str] = {}
+    env_note = "no Builder env file provided"
+    if env_file_path:
+        try:
+            env_map = _read_env_map(env_file_path=env_file_path)
+            env_note = "Builder env file read"
+        except Exception as exc:
+            env_note = f"Builder env file unavailable: {exc}"
+    local_stt_ready = _local_faster_whisper_available()
+    local_tts_ready = _local_pyttsx3_available()
+    paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
+    paid_tts_ready = bool(env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID))
+    return {
+        "env": {"status": env_note, "provided": bool(env_file_path)},
+        "local_stt": {
+            "ready": local_stt_ready,
+            "status": "ready via faster-whisper" if local_stt_ready else "install optional `faster-whisper` for offline STT",
+            "cost": "free/local",
+        },
+        "local_tts": {
+            "ready": local_tts_ready,
+            "status": "ready via pyttsx3" if local_tts_ready else "install optional `pyttsx3` for offline TTS",
+            "cost": "free/local",
+        },
+        "paid_stt": {
+            "ready": paid_stt_ready,
+            "status": "configured for OpenAI-compatible STT" if paid_stt_ready else "add OpenAI-compatible STT env refs",
+            "cost": "provider usage",
+        },
+        "paid_tts": {
+            "ready": paid_tts_ready,
+            "status": "configured for ElevenLabs TTS" if paid_tts_ready else f"add ELEVENLABS_API_KEY and {ENV_TTS_VOICE_ID}",
+            "cost": "provider usage",
+        },
+    }
+
+
+def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
+    dedicated_provider = _resolve_dedicated_transcription_provider(payload)
+    if dedicated_provider is not None:
+        return dedicated_provider
+    provider_error = str(payload.get("provider_error") or "").strip()
+    if provider_error:
+        raise ValueError(provider_error)
+    provider = payload.get("provider")
+    if not isinstance(provider, dict):
+        raise ValueError("Builder did not provide a voice transcription provider payload.")
+    provider_id = str(provider.get("provider_id") or "").strip()
+    provider_kind = str(provider.get("provider_kind") or "").strip()
+    auth_method = str(provider.get("auth_method") or "").strip()
+    execution_transport = str(provider.get("execution_transport") or "").strip()
+    base_url = str(provider.get("base_url") or "").strip()
+    secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if provider_kind not in SUPPORTED_PROVIDER_KINDS:
+        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime.")
+    if execution_transport and execution_transport != "direct_http":
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
+        )
+    if auth_method != "api_key_env":
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
+        )
+    if not base_url:
+        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured.")
+    if not env_file_path:
+        raise ValueError("Builder did not provide an env file path for voice transcription.")
+    if not secret_env_ref:
+        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no env secret reference configured.")
+    secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
+    if not secret_value:
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing secret value for env ref '{secret_env_ref}'."
+        )
+    return {
+        "provider_id": provider_id,
+        "provider_kind": provider_kind,
+        "base_url": base_url,
+        "secret_value": secret_value,
+    }
+
+
+def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[str, str] | None:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if not env_file_path:
+        return None
+    env_map = _read_env_map(env_file_path=env_file_path)
+    provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
+    base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
+    secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()
+    if provider_id or base_url or secret_env_ref:
+        resolved_provider_id = provider_id or "openai"
+        if resolved_provider_id != "openai":
+            raise ValueError(f"VOICE_TRANSCRIBE_PROVIDER '{resolved_provider_id}' is not supported yet.")
+        resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
+        secret_value = env_map.get(resolved_secret_env_ref)
+        if not secret_value:
+            raise ValueError(
+                f"Voice transcription is missing secret value for env ref '{resolved_secret_env_ref}'."
+            )
+        return {
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            "secret_value": str(secret_value).strip(),
+        }
+    openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
+    if openai_key:
+        return {
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "base_url": DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            "secret_value": openai_key,
+        }
+    return None
+
+
+def _read_env_value(*, env_file_path: str, key: str) -> str | None:
+    return _read_env_map(env_file_path=env_file_path).get(key)
+
+
+def _read_env_map(*, env_file_path: str) -> dict[str, str]:
+    path = Path(env_file_path)
+    if not path.exists():
+        raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
+    env_map: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, value = stripped.partition("=")
+        env_map[name.strip()] = value.strip()
+    return env_map
+
+
+def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
+    mode = str(payload.get("fallback_mode") or "").strip().lower()
+    if not mode:
+        return None
+    if mode not in SUPPORTED_FALLBACK_MODES:
+        raise ValueError(
+            f"Unsupported fallback_mode '{mode}'. Supported fallback modes: {', '.join(sorted(SUPPORTED_FALLBACK_MODES))}."
+        )
+    return mode
+
+
+def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) -> dict[str, Any]:
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("voice.speak requires non-empty text.")
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    tts_payload = payload.get("tts")
+    tts = tts_payload if isinstance(tts_payload, dict) else {}
+    surface = str(payload.get("surface") or "").strip().lower()
+    provider_id = str(tts.get("provider_id") or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
+    env_map = _read_env_map(env_file_path=env_file_path) if env_file_path else {}
+    if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
+        return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
+    if provider_id != "elevenlabs":
+        raise ValueError(f"voice.speak does not yet support provider '{provider_id}'.")
+    if not env_file_path:
+        raise ValueError("Builder did not provide an env file path for voice synthesis.")
+    auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
+    if auth_method != "api_key_env":
+        raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
+    secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
+    if not secret_env_ref:
+        raise ValueError("voice.speak requires a secret_env_ref for the TTS provider.")
+    secret_value = env_map.get(secret_env_ref)
+    if not secret_value:
+        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+    provider_profile = get_provider_voice_profile(profile, "elevenlabs")
+    speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
+    voice_settings = tts.get("voice_settings")
+    provided_voice_settings = voice_settings if isinstance(voice_settings, dict) else {}
+    output_format = str(tts.get("output_format") or "").strip()
+    if not output_format:
+        output_format = (
+            DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT if surface == "telegram" else DEFAULT_ELEVENLABS_OUTPUT_FORMAT
+        )
+    mime_type, file_extension, voice_compatible = _resolve_elevenlabs_output_metadata(output_format)
+    return {
+        "provider_id": "elevenlabs",
+        "surface": surface,
+        "base_url": str(tts.get("base_url") or env_map.get(ENV_TTS_BASE_URL) or DEFAULT_ELEVENLABS_BASE_URL).strip()
+        or DEFAULT_ELEVENLABS_BASE_URL,
+        "secret_value": secret_value,
+        "text": text,
+        "voice_id": str(tts.get("voice_id") or env_map.get(ENV_TTS_VOICE_ID) or provider_profile.get("primary_voice_id") or "").strip(),
+        "preferred_voice_name": str(
+            tts.get("voice_name") or env_map.get(ENV_TTS_VOICE_NAME) or provider_profile.get("primary_voice_name") or ""
+        ).strip(),
+        "model_id": str(tts.get("model_id") or env_map.get(ENV_TTS_MODEL_ID) or provider_profile.get("model_id") or DEFAULT_ELEVENLABS_MODEL_ID).strip()
+        or DEFAULT_ELEVENLABS_MODEL_ID,
+        "output_format": output_format,
+        "mime_type": mime_type,
+        "file_extension": file_extension,
+        "voice_compatible": voice_compatible,
+        "voice_settings": {
+            "stability": provided_voice_settings.get("stability", 0.92),
+            "similarity_boost": provided_voice_settings.get("similarity_boost", 0.78),
+            "style": provided_voice_settings.get("style", 0.03),
+            "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
+            "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
+        },
+    }
+
+
+def _resolve_local_tts_request(
+    *,
+    payload: dict[str, Any],
+    tts: dict[str, Any],
+    env_map: dict[str, str],
+    text: str,
+    surface: str,
+) -> dict[str, Any]:
+    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
+    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
+    voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
+    return {
+        "provider_id": LOCAL_TTS_PROVIDER,
+        "surface": surface,
+        "text": text,
+        "voice_id": voice_name or "local-system-voice",
+        "model_id": "system-tts",
+        "mime_type": "audio/wav",
+        "file_extension": ".wav",
+        "voice_compatible": False,
+        "rate": rate,
+        "volume": volume,
+        "voice_name": voice_name,
+    }
+
+
+def _resolve_optional_float(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    voice_id = str(request["voice_id"]).strip()
+    if not voice_id:
+        raise ValueError(
+            f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
+        )
+    retried_with_fallback = False
+    while True:
+        base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
+        query = {"optimize_streaming_latency": "2"}
+        output_format = str(request.get("output_format") or "").strip()
+        if output_format:
+            query["output_format"] = output_format
+        url = f"{base_url}?{urllib.parse.urlencode(query)}"
+        body = {
+            "text": request["text"],
+            "model_id": request["model_id"],
+            "voice_settings": request["voice_settings"],
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={
+                "xi-api-key": request["secret_value"],
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as response:
+                audio_bytes = response.read()
+            if not audio_bytes:
+                raise RuntimeError("ElevenLabs returned empty audio.")
+            return audio_bytes, voice_id
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            is_not_found = "voice_not_found" in detail.lower()
+            if is_not_found and not retried_with_fallback:
+                fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
+                if fallback_voice_id and fallback_voice_id != voice_id:
+                    voice_id = fallback_voice_id
+                    retried_with_fallback = True
+                    continue
+            raise RuntimeError(f"ElevenLabs TTS request failed: {detail or exc}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"ElevenLabs TTS network error: {exc.reason}") from exc
+
+
+def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    try:
+        pyttsx3 = importlib.import_module("pyttsx3")
+    except Exception as exc:
+        raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
+            temp_path = handle.name
+        engine = pyttsx3.init()
+        rate = request.get("rate")
+        if rate is not None:
+            engine.setProperty("rate", int(rate))
+        volume = request.get("volume")
+        if volume is not None:
+            engine.setProperty("volume", max(0.0, min(1.0, float(volume))))
+        voice_name = str(request.get("voice_name") or "").strip().lower()
+        if voice_name:
+            for voice in engine.getProperty("voices") or []:
+                name = str(getattr(voice, "name", "") or "").lower()
+                voice_id = str(getattr(voice, "id", "") or "")
+                if voice_name in name or voice_name in voice_id.lower():
+                    engine.setProperty("voice", voice_id)
+                    break
+        engine.save_to_file(request["text"], temp_path)
+        engine.runAndWait()
+        audio_bytes = Path(temp_path).read_bytes()
+        if not audio_bytes:
+            raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
+        return audio_bytes, str(request.get("voice_id") or "local-system-voice")
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, bool]:
+    normalized = str(output_format or "").strip().lower()
+    if normalized.startswith("opus") or "ogg" in normalized:
+        return ("audio/ogg", ".ogg", True)
+    if normalized.startswith("pcm"):
+        return ("audio/wav", ".wav", False)
+    return ("audio/mpeg", ".mp3", False)
+
+
+def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | None:
+    req = urllib.request.Request(
+        _join_url(request["base_url"], "voices"),
+        headers={"xi-api-key": request["secret_value"]},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+    voices = payload.get("voices") if isinstance(payload, dict) else None
+    if not isinstance(voices, list) or not voices:
+        return None
+    preferred_name = str(request.get("preferred_voice_name") or "").strip()
+    if preferred_name:
+        for voice in voices:
+            if str(voice.get("name") or "").strip().lower() == preferred_name.lower():
+                candidate = str(voice.get("voice_id") or "").strip()
+                if candidate:
+                    return candidate
+    for voice in voices:
+        candidate = str(voice.get("voice_id") or "").strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _build_deterministic_fallback_transcript(
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    reason: str,
+) -> str:
+    digest = hashlib.sha256(audio_bytes).hexdigest()
+    seed = int(digest[:8], 16)
+    approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
+    snippets = [
+        "Ready when you are.",
+        "Holding for your next command.",
+        "Signal received and queued.",
+        "Spark fallback captured your audio.",
+        "Mic packet decoded locally.",
+    ]
+    snippet = snippets[seed % len(snippets)]
+    cleaned_reason = " ".join(str(reason or "").strip().split())
+    return (
+        f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
+        f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
+        f"Provider reason: {cleaned_reason or 'unknown failure'}."
+    )
+
+
+def _local_faster_whisper_available() -> bool:
+    return importlib.util.find_spec("faster_whisper") is not None
+
+
+def _local_pyttsx3_available() -> bool:
+    return importlib.util.find_spec("pyttsx3") is not None
+
+
+def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if env_file_path:
+        env_map = _read_env_map(env_file_path=env_file_path)
+        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
+        if configured:
+            return configured
+    return "tiny"
+
+
+def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | None:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if env_file_path:
+        env_map = _read_env_map(env_file_path=env_file_path)
+        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
+        if configured:
+            return configured
+    return None
+
+
+def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if env_file_path:
+        env_map = _read_env_map(env_file_path=env_file_path)
+        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
+        if configured in {"1", "true", "yes", "on"}:
+            return True
+        if configured in {"0", "false", "no", "off"}:
+            return False
+    return True
+
+
+def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if env_file_path:
+        env_map = _read_env_map(env_file_path=env_file_path)
+        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
+        if configured:
+            try:
+                return max(1, int(configured))
+            except ValueError:
+                pass
+    return 5
+
+
+def _transcribe_with_local_faster_whisper(
+    *,
+    payload: dict[str, Any],
+    audio_bytes: bytes,
+    filename: str,
+) -> str:
+    from faster_whisper import WhisperModel
+
+    suffix = Path(filename).suffix or ".wav"
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+            handle.write(audio_bytes)
+            temp_path = handle.name
+        model = WhisperModel(_resolve_local_faster_whisper_model(payload), device="cpu", compute_type="int8")
+        transcribe_kwargs: dict[str, Any] = {
+            "beam_size": _resolve_local_faster_whisper_beam_size(payload),
+            "condition_on_previous_text": False,
+            "vad_filter": _resolve_local_faster_whisper_vad_filter(payload),
+        }
+        language = _resolve_local_faster_whisper_language(payload)
+        if language:
+            transcribe_kwargs["language"] = language
+        segments, _info = model.transcribe(temp_path, **transcribe_kwargs)
+        text = " ".join(str(segment.text or "").strip() for segment in segments).strip()
+        if not text:
+            raise ValueError("Local faster-whisper returned no transcript text.")
+        return text
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _transcribe_with_provider(
+    *,
+    provider: dict[str, str],
+    audio_bytes: bytes,
+    filename: str,
+    mime_type: str,
+) -> str:
+    payload = _post_multipart(
+        _join_url(provider["base_url"], "audio/transcriptions"),
+        headers={"Authorization": f"Bearer {provider['secret_value']}"},
+        fields={"model": DEFAULT_TRANSCRIPTION_MODEL},
+        files=[
+            {
+                "field_name": "file",
+                "filename": filename,
+                "mime_type": mime_type,
+                "content": audio_bytes,
+            }
+        ],
+    )
+    decoded = _decode_response(payload)
+    transcript_text = _extract_transcript_text(decoded)
+    if not transcript_text:
+        raise ValueError("The voice provider returned no transcript text.")
+    return transcript_text
+
+
+def _post_multipart(
+    url: str,
+    *,
+    headers: dict[str, str],
+    fields: dict[str, str],
+    files: list[dict[str, object]],
+) -> bytes:
+    boundary = f"voice-chip-{uuid4().hex}"
+    body = bytearray()
+    for key, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
+        body.extend(str(value).encode("utf-8"))
+        body.extend(b"\r\n")
+    for file_info in files:
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(
+            (
+                f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
+                f'filename="{file_info["filename"]}"\r\n'
+                f'Content-Type: {file_info["mime_type"]}\r\n\r\n'
+            ).encode("utf-8")
+        )
+        body.extend(bytes(file_info["content"]))
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+    request = urllib.request.Request(
+        url,
+        data=bytes(body),
+        headers={
+            **headers,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
+
+
+def _decode_response(payload: bytes) -> dict[str, Any] | str:
+    text = payload.decode("utf-8", errors="replace").strip()
+    if not text:
+        raise ValueError("Voice provider response was empty.")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
+    if isinstance(payload, str):
+        return payload.strip()
+    for key in ("text", "transcript"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _join_url(base_url: str, suffix: str) -> str:
+    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+
+
+def _write_output(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("hook", choices=["voice.status", "voice.plan", "voice.onboard", "voice.transcribe", "voice.speak"])
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+
+    payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
+    try:
+        if args.hook == "voice.status":
+            result = handle_voice_status_hook(payload)
+        elif args.hook == "voice.plan":
+            result = handle_voice_plan_hook(payload)
+        elif args.hook == "voice.onboard":
+            result = handle_voice_onboard_hook(payload)
+        elif args.hook == "voice.speak":
+            result = handle_voice_speak_hook(payload)
+        else:
+            result = handle_voice_transcribe_hook(payload)
+    except Exception as exc:
+        _write_output(
+            Path(args.output),
+            {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "metrics": {},
+                "result": {},
+                "error": str(exc),
+            },
+        )
+        return 1
+
+    _write_output(Path(args.output), result)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
