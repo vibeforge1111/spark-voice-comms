@@ -348,6 +348,28 @@ def test_voice_onboard_reports_paid_provider_readiness(tmp_path):
     assert result["result"]["snapshot"]["paid_tts"]["ready"] is True
 
 
+def test_voice_onboard_reads_openai_realtime_from_utf8_sig_env(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TTS_PROVIDER=openai-realtime",
+                "VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8-sig",
+    )
+
+    result = handle_voice_onboard_hook({"route": "paid", "builder_env_file_path": str(env_file)})
+
+    assert result["returncode"] == 0
+    assert result["result"]["snapshot"]["paid_tts"]["ready"] is True
+    assert result["result"]["snapshot"]["paid_tts"]["provider"] == "openai-realtime"
+    assert "GPT Realtime 2" in result["result"]["reply_text"]
+
+
 def test_cli_main_accepts_utf8_sig_payload(tmp_path):
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "output.json"

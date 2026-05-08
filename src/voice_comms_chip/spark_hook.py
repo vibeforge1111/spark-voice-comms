@@ -330,9 +330,18 @@ def _voice_onboarding_reply_text(
             ]
         return "\n".join(line for line in lines if line is not None)
     if recommended_path == "paid_provider":
+        if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+            lead = "GPT Realtime 2 is configured for hosted voice replies."
+            recommendation = "I would use it for the more expressive voice-agent path, while keeping ElevenLabs as the simpler classic TTS fallback."
+        else:
+            lead = "For paid voice, I would optimize for reliable Telegram delivery first, then tune the voice character."
+            recommendation = (
+                "My current recommendation is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
+                "and MiniMax or Z.ai only through explicit adapters once they are verified."
+            )
         lines = [
-            "For paid voice, I would optimize for reliable Telegram delivery first, then tune the voice character.",
-            "My current recommendation is hosted transcription plus a high-quality TTS provider like ElevenLabs, with MiniMax and Z.ai treated as explicit voice adapters once they are verified.",
+            lead,
+            recommendation,
             context_line,
             "",
             next_step,
@@ -921,7 +930,7 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     if not path.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
