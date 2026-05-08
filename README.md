@@ -1,6 +1,6 @@
 # Spark Voice Comms
 
-Drop-in voice communications hooks for Spark agents.
+Public voice communication hooks for Spark agents.
 
 License: AGPL-3.0-only. See [LICENSE](./LICENSE).
 
@@ -24,6 +24,29 @@ This chip lets a Spark Builder runtime add voice without absorbing voice code in
 - Telegram-friendly Opus output when `surface=telegram`
 
 Voice is still an explicitly activated capability. Installing this chip does not grant a Spark agent microphone, Telegram delivery, provider credentials, or approval to speak. The host Spark runtime must attach the chip, provide local secrets, and decide when voice is allowed.
+
+This is the public voice lab. Do not use or document the older `spark-voice-engine` work as the current public voice system.
+
+## Current Public Boundary
+
+Public and safe to use:
+
+- voice hook code
+- voice profile shapes
+- deterministic fallback transcripts for tests
+- provider compatibility docs
+- local STT/TTS setup guidance
+
+Private or review before sharing:
+
+- provider keys
+- recordings
+- transcripts
+- generated audio
+- concrete hosted voice ids
+- Telegram tokens or runtime state
+
+The default Spark starter installer does not install every public lab automatically. `spark-voice-comms` is available as an optional chip/lab until it exposes the same installable module contract as the starter modules.
 
 Current Spark integration map: [docs/CURRENT_SPARK_INTEGRATION_MAP.md](docs/CURRENT_SPARK_INTEGRATION_MAP.md).
 
