@@ -831,7 +831,7 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
                 f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
                 "VOICE_TTS_PROVIDER=openai-realtime",
                 "VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2",
-                "VOICE_TTS_OPENAI_REALTIME_VOICE=sage",
+                "VOICE_TTS_OPENAI_REALTIME_VOICE=coral",
             ]
         )
         + "\n",
@@ -859,7 +859,7 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
     assert result["returncode"] == 0
     assert result["result"]["provider_id"] == "openai-realtime"
     assert result["result"]["model_id"] == "gpt-realtime-2"
-    assert result["result"]["voice_id"] == "sage"
+    assert result["result"]["voice_id"] == "coral"
     assert result["result"]["mime_type"] == "audio/wav"
     assert result["result"]["voice_compatible"] is False
     assert captured["url"] == "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"

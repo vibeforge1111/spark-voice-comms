@@ -22,6 +22,10 @@
       "primary": "presenter_male",
       "fallback": "male-qn-qingse"
     },
+    "openai_realtime": {
+      "primary": "coral",
+      "fallbacks": ["marin", "shimmer", "nova", "sage"]
+    },
     "browser_speechsynthesis": {
       "preferred_voice_names": [
         "Microsoft David Desktop",

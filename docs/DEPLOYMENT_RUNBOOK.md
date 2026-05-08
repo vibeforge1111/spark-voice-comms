@@ -99,7 +99,7 @@ python -m pip install -e ".[openai-realtime]"
 OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
-VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 ```
 
 Then run:

@@ -125,7 +125,7 @@ python -m pip install -e ".[openai-realtime]"
 OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
-VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 ```
 
 This path uses the Realtime WebSocket API and returns WAV audio to the channel adapter. Keep the key in Builder's local env/secret layer, never in Telegram.
