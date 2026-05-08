@@ -38,6 +38,10 @@ DEFAULT_OPENAI_REALTIME_MODEL_ID = "gpt-realtime-2"
 DEFAULT_OPENAI_REALTIME_VOICE = "sage"
 DEFAULT_OPENAI_REALTIME_SAMPLE_RATE = 24000
 DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS = 45
+DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
+    "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
+    "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
+)
 OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
@@ -1117,6 +1121,7 @@ def _resolve_openai_realtime_tts_request(
     model_id = str(
         tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
     ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
+    style_instructions = str(tts.get("instructions") or env_map.get(ENV_OPENAI_REALTIME_INSTRUCTIONS) or "").strip()
     return {
         "provider_id": OPENAI_REALTIME_TTS_PROVIDER,
         "surface": surface,
@@ -1128,13 +1133,23 @@ def _resolve_openai_realtime_tts_request(
         "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_OPENAI_REALTIME_VOICE) or DEFAULT_OPENAI_REALTIME_VOICE).strip()
         or DEFAULT_OPENAI_REALTIME_VOICE,
         "reasoning_effort": str(tts.get("reasoning_effort") or env_map.get(ENV_OPENAI_REALTIME_REASONING_EFFORT) or "").strip(),
-        "instructions": str(tts.get("instructions") or env_map.get(ENV_OPENAI_REALTIME_INSTRUCTIONS) or "Speak naturally and keep this reply concise.").strip(),
+        "instructions": _openai_realtime_tts_instructions(style_instructions),
         "sample_rate": sample_rate,
         "timeout_seconds": max(5.0, min(120.0, float(timeout_seconds))),
         "mime_type": "audio/wav",
         "file_extension": ".wav",
         "voice_compatible": False,
     }
+
+
+def _openai_realtime_tts_instructions(style_instructions: str) -> str:
+    style = str(style_instructions or "").strip()
+    if not style or style == DEFAULT_OPENAI_REALTIME_INSTRUCTIONS:
+        return DEFAULT_OPENAI_REALTIME_INSTRUCTIONS
+    return (
+        f"{DEFAULT_OPENAI_REALTIME_INSTRUCTIONS}\n\n"
+        f"Voice style note, only if it does not change the words: {style}"
+    )
 
 
 def _resolve_optional_float(value: Any) -> float | None:
@@ -1307,6 +1322,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                     "type": "response.create",
                     "response": {
                         "conversation": "none",
+                        "instructions": str(request["instructions"]),
                         "output_modalities": ["audio"],
                         "audio": {
                             "output": {

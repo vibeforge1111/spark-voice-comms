@@ -865,7 +865,9 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
     assert captured["url"] == "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
     assert "Authorization: Bearer " + FAKE_OPENAI_KEY in captured["header"]
     assert sent_messages[0]["type"] == "session.update"
+    assert "verbatim" in sent_messages[0]["session"]["instructions"]
     assert sent_messages[1]["type"] == "response.create"
+    assert sent_messages[1]["response"]["instructions"] == sent_messages[0]["session"]["instructions"]
     assert sent_messages[1]["response"]["input"][0]["content"][0]["text"] == "Use the new realtime voice."
 
 
