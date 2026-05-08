@@ -25,6 +25,8 @@ The agent should keep setup conversational:
 Users can ask:
 
 - `Can you help me set up voice?`
+- `Install Kokoro voice locally`
+- `/voice install kokoro`
 - `voice onboard local`
 - `voice onboard paid`
 - `Can I use free local TTS?`
@@ -39,6 +41,8 @@ Recommend this when the user wants privacy, zero provider spend, or a first smok
 python -m pip install -e ".[local]"
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.onboard --home "<spark-home>" --payload-json "{\"route\":\"local\"}"
 ```
+
+If the user asks from Telegram and is an approved operator, route `/voice install kokoro` through `voice.install` before asking them to add model paths. Do not install hosted-provider SDKs or collect provider keys in Telegram.
 
 What this path means:
 

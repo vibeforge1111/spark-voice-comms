@@ -8,6 +8,8 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -162,6 +164,80 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 "voice status",
                 "voice plan",
             ],
+        },
+    }
+
+
+def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
+    if target in {"local", "local-tts", "kokoro-onnx"}:
+        target = LOCAL_KOKORO_TTS_PROVIDER
+    if target != LOCAL_KOKORO_TTS_PROVIDER:
+        raise ValueError("voice.install currently supports only `kokoro`.")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime.")
+    was_ready = _local_kokoro_package_available()
+    if was_ready:
+        install_status = "already_installed"
+        pip_tail: list[str] = []
+    else:
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "kokoro-onnx>=0.5.0",
+            "soundfile>=0.12",
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+        pip_tail = _tail_nonempty_lines(pip_output, limit=8)
+        if completed.returncode != 0:
+            return {
+                "returncode": 1,
+                "stdout": "kokoro install failed",
+                "stderr": "\n".join(pip_tail),
+                "metrics": {"installed": 0, "already_installed": 0},
+                "result": {
+                    "reply_text": (
+                        "Kokoro install failed in the local Python runtime.\n"
+                        "I did not touch provider keys or model paths.\n"
+                        "Next: check the local package error, then rerun `/voice install kokoro`."
+                    ),
+                    "target": target,
+                    "python": sys.executable,
+                    "installed": False,
+                    "already_installed": False,
+                    "pip_tail": pip_tail,
+                },
+            }
+        install_status = "installed"
+    is_ready = _local_kokoro_package_available()
+    reply_text = "\n".join(
+        [
+            "Kokoro local TTS install",
+            "Status: already installed." if install_status == "already_installed" else "Status: package install completed.",
+            f"Python: {sys.executable}",
+            "",
+            "Next: add local model paths outside Telegram:",
+            f"- {ENV_KOKORO_MODEL_PATH}=<path to kokoro-v1.0.onnx>",
+            f"- {ENV_KOKORO_VOICES_PATH}=<path to voices-v1.0.bin>",
+            "",
+            "Then rerun `/voice onboard local`.",
+        ]
+    )
+    return {
+        "returncode": 0,
+        "stdout": install_status,
+        "stderr": "",
+        "metrics": {"installed": 1 if is_ready else 0, "already_installed": 1 if was_ready else 0},
+        "result": {
+            "reply_text": reply_text,
+            "target": target,
+            "python": sys.executable,
+            "installed": is_ready,
+            "already_installed": was_ready,
+            "pip_tail": pip_tail,
         },
     }
 
@@ -631,6 +707,11 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
         name, _, value = stripped.partition("=")
         env_map[name.strip()] = value.strip()
     return env_map
+
+
+def _tail_nonempty_lines(text: str, *, limit: int) -> list[str]:
+    lines = [" ".join(line.strip().split()) for line in str(text or "").splitlines()]
+    return [line for line in lines if line][-limit:]
 
 
 def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
@@ -1156,7 +1237,10 @@ def _write_output(path: Path, payload: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("hook", choices=["voice.status", "voice.plan", "voice.onboard", "voice.transcribe", "voice.speak"])
+    parser.add_argument(
+        "hook",
+        choices=["voice.status", "voice.plan", "voice.onboard", "voice.install", "voice.transcribe", "voice.speak"],
+    )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -1169,6 +1253,8 @@ def main() -> int:
             result = handle_voice_plan_hook(payload)
         elif args.hook == "voice.onboard":
             result = handle_voice_onboard_hook(payload)
+        elif args.hook == "voice.install":
+            result = handle_voice_install_hook(payload)
         elif args.hook == "voice.speak":
             result = handle_voice_speak_hook(payload)
         else:

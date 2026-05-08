@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from voice_comms_chip.spark_hook import (
+    handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
     handle_voice_speak_hook,
@@ -171,6 +172,46 @@ def test_voice_onboard_uses_source_labeled_local_preference():
     assert result["returncode"] == 0
     assert result["result"]["preference_note"]["preference"] == "local"
     assert "preference context leans local/private" in result["result"]["reply_text"]
+
+
+def test_voice_install_kokoro_runs_local_pip_when_missing():
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, capture_output: bool, text: bool, timeout: int, check: bool):
+        calls.append(command)
+        assert capture_output is True
+        assert text is True
+        assert timeout == 300
+        assert check is False
+        return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
+
+    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", side_effect=[False, True]), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+        side_effect=fake_run,
+    ):
+        result = handle_voice_install_hook({"target": "kokoro"})
+
+    assert result["returncode"] == 0
+    assert result["result"]["installed"] is True
+    assert result["result"]["already_installed"] is False
+    assert calls
+    assert calls[0][1:4] == ["-m", "pip", "install"]
+    assert "kokoro-onnx>=0.5.0" in calls[0]
+    assert "soundfile>=0.12" in calls[0]
+    assert "VOICE_TTS_KOKORO_MODEL_PATH" in result["result"]["reply_text"]
+
+
+def test_voice_install_kokoro_skips_pip_when_already_installed():
+    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+    ) as run:
+        result = handle_voice_install_hook({"target": "kokoro"})
+
+    assert result["returncode"] == 0
+    assert result["stdout"] == "already_installed"
+    assert result["result"]["installed"] is True
+    assert result["result"]["already_installed"] is True
+    run.assert_not_called()
 
 
 def test_voice_onboard_reports_paid_provider_readiness(tmp_path):

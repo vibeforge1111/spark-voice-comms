@@ -9,6 +9,7 @@ This chip lets a Spark Builder runtime add voice without absorbing voice code in
 - `voice.status`
 - `voice.plan`
 - `voice.onboard`
+- `voice.install`
 - `voice.transcribe`
 - `voice.speak`
 
@@ -40,6 +41,7 @@ python -m spark_intelligence.cli attachments add-root chips "<path-to-spark-voic
 python -m spark_intelligence.cli attachments activate-chip spark-voice-comms --home "<spark-home>"
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.status --home "<spark-home>"
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.onboard --home "<spark-home>"
+python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.install --home "<spark-home>" --payload-json "{\"target\":\"kokoro\"}"
 ```
 
 If your Builder CLI version supports `--payload-json`, you can run a deterministic local transcribe smoke without a provider:

@@ -5,11 +5,12 @@
   "domain": "voice-communications",
   "version": "0.1.0",
   "description": "Modular voice communications hooks for Spark Intelligence Builder.",
-  "capabilities": ["voice.status", "voice.plan", "voice.onboard", "voice.transcribe", "voice.speak"],
+  "capabilities": ["voice.status", "voice.plan", "voice.onboard", "voice.install", "voice.transcribe", "voice.speak"],
   "commands": {
     "voice.status": ["python", "-m", "voice_comms_chip.spark_hook", "voice.status"],
     "voice.plan": ["python", "-m", "voice_comms_chip.spark_hook", "voice.plan"],
     "voice.onboard": ["python", "-m", "voice_comms_chip.spark_hook", "voice.onboard"],
+    "voice.install": ["python", "-m", "voice_comms_chip.spark_hook", "voice.install"],
     "voice.transcribe": ["python", "-m", "voice_comms_chip.spark_hook", "voice.transcribe"],
     "voice.speak": ["python", "-m", "voice_comms_chip.spark_hook", "voice.speak"]
   },
@@ -31,12 +32,14 @@
     "health_checks": [
       "voice.status",
       "voice.onboard",
+      "voice.install",
       "voice.plan"
     ],
     "example_intents": [
       "Reply in voice.",
       "Transcribe this voice note.",
       "Help me set up voice.",
+      "Install Kokoro voice locally.",
       "Can I use free local TTS?",
       "Set up paid voice."
     ],

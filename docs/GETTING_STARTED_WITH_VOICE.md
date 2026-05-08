@@ -34,6 +34,7 @@ If `voice.status` is not ready, it should explain which provider or secret refer
 If `voice.onboard` is available to your Spark Telegram agent, users can ask setup questions there too. Good first prompts are:
 
 - `voice onboard local`
+- `voice install kokoro`
 - `voice onboard paid`
 - `voice status`
 - `voice plan`
@@ -88,6 +89,12 @@ For a higher-quality free local TTS path, use Kokoro:
 
 ```bash
 python -m pip install -e ".[local-kokoro]"
+```
+
+If the Telegram runtime exposes `voice.install`, an admin can also ask Spark:
+
+```text
+/voice install kokoro
 ```
 
 Download the Kokoro ONNX model and voices file locally, then point Spark at those files through the Builder env file or secret/config layer:

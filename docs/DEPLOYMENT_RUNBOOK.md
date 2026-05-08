@@ -35,6 +35,7 @@ From Telegram, ask:
 
 ```text
 /voice onboard
+/voice install kokoro
 /voice onboard local
 /voice onboard paid
 ```
