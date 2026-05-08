@@ -124,7 +124,8 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
     assert result["result"]["ready"] is True
     assert result["result"]["local_ready"] is True
     assert "Local voice is ready." in result["result"]["reply_text"]
-    assert "Provider note:" in result["result"]["reply_text"]
+    assert "hosted/custom transcription provider still has not been verified" in result["result"]["reply_text"]
+    assert "ask me to say something with Kokoro" in result["result"]["reply_text"]
     assert "Voice chip is not ready yet" not in result["result"]["reply_text"]
 
 

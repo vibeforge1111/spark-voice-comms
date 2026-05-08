@@ -76,28 +76,44 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
     if status.get("local_ready"):
+        profile_name = str(profile_summary["profile_name"])
+        tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
         lines = [
             "Local voice is ready.",
-            f"Current state: {status['reason']}",
+            "",
+            "I can listen with faster-whisper and speak back with Kokoro from this machine.",
         ]
         provider_note = str(status.get("provider_note") or "").strip()
         if provider_note:
-            lines.append(f"Provider note: {provider_note}")
+            lines.extend(
+                [
+                    "",
+                    "Your hosted/custom transcription provider still has not been verified, so I will use the local path for now.",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                f"Voice profile: {profile_name}, {tone_identity}.",
+                "",
+                "Next: send a short Telegram voice note, or ask me to say something with Kokoro.",
+            ]
+        )
     else:
         lines = [
             "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
             f"Current state: {status['reason']}",
         ]
-    lines.append(
-        f"Voice profile: {profile_summary['profile_name']} "
-        f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
-    )
-    if status["ready"]:
-        lines.append("Next: send a Telegram voice note and I will route it through this chip.")
-    else:
         lines.append(
-            "Next: finish provider setup for voice transcription, then rerun `/voice`."
+            f"Voice profile: {profile_summary['profile_name']} "
+            f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
         )
+        if status["ready"]:
+            lines.append("Next: send a Telegram voice note and I will route it through this chip.")
+        else:
+            lines.append(
+                "Next: finish provider setup for voice transcription, then rerun `/voice`."
+            )
     return {
         "returncode": 0,
         "stdout": status["reason"],
