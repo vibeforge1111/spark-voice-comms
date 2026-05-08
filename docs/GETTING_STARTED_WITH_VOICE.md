@@ -39,6 +39,14 @@ If `voice.onboard` is available to your Spark Telegram agent, users can ask setu
 - `voice status`
 - `voice plan`
 
+Natural-language prompts should work too:
+
+- `Can you help me set up voice locally for Spark?`
+- `I want private local voice replies.`
+- `I want the highest-quality paid voice for my Spark agent.`
+
+Spark should answer these like an onboarding guide, not like a diagnostic dump. Keep env names, Python paths, and provider secrets out of Telegram unless the operator explicitly asks for local config details.
+
 ## 3. Configure Speech-To-Text
 
 Add provider settings to the local Builder environment file or secret layer. Do not commit this file.
@@ -96,6 +104,8 @@ If the Telegram runtime exposes `voice.install`, an admin can also ask Spark:
 ```text
 /voice install kokoro
 ```
+
+The Telegram response should simply say whether Kokoro is installed and what human step remains. The structured hook result can still carry the Python path, pip tail, and readiness fields for diagnostics.
 
 Download the Kokoro ONNX model and voices file locally, then point Spark at those files through the Builder env file or secret/config layer:
 

@@ -13,12 +13,12 @@ When a user asks for voice, the agent should help them choose one of two paths:
 
 The agent should keep setup conversational:
 
-1. explain the two paths
-2. ask which path they want
-3. run or summarize `voice.onboard`
-4. guide them through only the missing step
+1. start from what the user wants, not from an inventory of providers
+2. recommend the best path for this Spark when enough context is available
+3. explain only the missing step in plain language
+4. keep provider keys, env names, and Python paths out of Telegram unless the user is explicitly doing operator setup
 5. confirm with `voice.status`
-6. run one safe smoke before telling them voice is ready
+6. ask for one short voice reply before telling them voice is ready
 
 ## Suggested Telegram Prompts
 
@@ -87,15 +87,33 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.st
 
 ## Agent Reply Template
 
-Use concise replies in Telegram:
+Use concise, human replies in Telegram. The reply should feel like Spark is guiding the operator, not printing a diagnostic report.
 
 ```text
-Voice setup has two good paths:
-- Local/free: private and no provider spend, using faster-whisper + Kokoro when available, or pyttsx3 for a basic smoke.
-- Paid/provider: better quality, using OpenAI-compatible STT + ElevenLabs TTS.
+I can help with voice.
 
-Tell me `local` or `paid`, and I will walk you through only the missing pieces.
+For this Spark, I would start local if you want privacy and no provider spend. Kokoro is the voice I would use for that path when the local model files are connected.
+
+If you want the most natural hosted voice, I would use verified transcription plus a paid TTS provider like ElevenLabs.
+
+Tell me local or paid, and I will walk you through only the part that is still missing.
 ```
+
+When Spark already knows the user's preference or runtime provider, personalize the recommendation:
+
+```text
+Since this Spark is already leaning local/private, I would finish Kokoro first. That keeps voice replies on this machine and avoids putting provider keys into Telegram.
+```
+
+Avoid Telegram-facing replies like:
+
+```text
+Status: package install completed.
+Python: C:\...
+VOICE_TTS_KOKORO_MODEL_PATH=<path>
+```
+
+Keep those details in local operator docs, structured hook results, or redacted diagnostics.
 
 ## Guardrails
 
