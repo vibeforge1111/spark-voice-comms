@@ -55,7 +55,7 @@ For the free local path, install faster-whisper:
 python -m pip install -e ".[local-stt]"
 ```
 
-When `faster-whisper` is installed, Spark's default STT mode is `auto`: use local faster-whisper first, with no OpenAI transcription call. This is the preferred path for private, cost-sensitive Telegram voice notes.
+Spark's default STT mode is `auto`: use local faster-whisper for private, cost-sensitive Telegram voice notes. If local STT is missing, the default path asks you to install it instead of silently using OpenAI transcription.
 
 Hosted STT is still supported when you explicitly want it. Add provider settings to the local Builder environment file or secret layer. Do not commit this file.
 
@@ -68,7 +68,7 @@ VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 
 Supported STT path today:
 
-- local faster-whisper first in default `auto` mode
+- local faster-whisper in default `auto` mode
 - OpenAI-compatible `/audio/transcriptions`
 - env-backed API key transport
 - deterministic fallback mode for tests

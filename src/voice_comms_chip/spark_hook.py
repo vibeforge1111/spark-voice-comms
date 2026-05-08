@@ -648,8 +648,11 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                     "mode": "local_faster_whisper",
                 },
             }
-    if transcription_mode == "local":
-        raise ValueError("Local faster-whisper transcription is selected, but `faster_whisper` is not installed.")
+    if transcription_mode in {"auto", "local"}:
+        raise ValueError(
+            "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
+            "Install `spark-voice-comms[local-stt]`, or set VOICE_TRANSCRIBE_PROVIDER=openai to explicitly opt into hosted transcription."
+        )
     try:
         provider = _resolve_provider(payload)
         transcript_text = _transcribe_with_provider(
@@ -713,19 +716,25 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
-    if transcription_mode == "local" and not local_stt_ready:
+    if transcription_mode in {"auto", "local"} and not local_stt_ready:
         return {
             "ready": False,
             "local_ready": False,
             "local_tts_ready": bool(local_tts_status["ready"]),
             "speech_reply_status": str(local_tts_status["status"]),
-            "reason": "local faster-whisper transcription is selected, but `faster_whisper` is not installed",
+            "reason": (
+                "local faster-whisper transcription is the default Telegram voice path, "
+                "but `faster_whisper` is not installed"
+            ),
             "provider_id": "local_faster_whisper",
             "provider_kind": "local",
             "model": _resolve_local_faster_whisper_model(payload),
         }
     if local_stt_ready and transcription_mode in {"auto", "local"}:
-        provider_note = "Hosted transcription is configured but local faster-whisper will be used first."
+        provider_note = (
+            "Hosted transcription is configured, but the default Telegram path will stay on local faster-whisper. "
+            "Set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted STT."
+        )
         provider_id = None
         provider_kind = None
         try:
@@ -936,6 +945,8 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
     if normalized_provider_id in {"auto", "default"}:
         provider_id = ""
     elif normalized_provider_id in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
+        return None
+    elif normalized_provider_id in {"builder", "provider", "configured-provider"}:
         return None
     base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
     secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()

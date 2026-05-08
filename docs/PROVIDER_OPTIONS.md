@@ -35,7 +35,7 @@ Useful when:
 
 Runtime selection:
 
-- default `VOICE_TRANSCRIBE_PROVIDER=auto` uses local faster-whisper first when it is installed
+- default `VOICE_TRANSCRIBE_PROVIDER=auto` uses local faster-whisper and does not silently spend hosted STT calls if local STT is missing
 - `VOICE_TRANSCRIBE_PROVIDER=local` requires local faster-whisper and will not call hosted STT
 - `VOICE_TRANSCRIBE_PROVIDER=openai` deliberately uses hosted OpenAI-compatible transcription, with local fallback available if installed
 

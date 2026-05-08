@@ -76,7 +76,7 @@ Free/local STT:
 python -m pip install -e ".[local-stt]"
 ```
 
-When `faster-whisper` is installed, the default `VOICE_TRANSCRIBE_PROVIDER=auto` path uses local transcription first, so Telegram voice notes do not require OpenAI transcription calls. Set `VOICE_TRANSCRIBE_PROVIDER=openai` only when you deliberately want hosted STT.
+The default `VOICE_TRANSCRIBE_PROVIDER=auto` path expects local faster-whisper for Telegram voice notes. It will not silently fall through to hosted transcription if local STT is missing. Set `VOICE_TRANSCRIBE_PROVIDER=openai` only when you deliberately want hosted STT.
 
 For TTS:
 
@@ -160,7 +160,7 @@ Implemented in this repo:
 - `voice.transcribe`
 - `voice.speak`
 - local deterministic fallback transcripts
-- local faster-whisper fallback when installed
+- local faster-whisper by default for Telegram voice notes
 - Telegram-targeted Opus output selection for `voice.speak`
 
 Activation status depends on the host Spark runtime. A Spark agent may have this chip installed but still report voice as unavailable until the operator approves the connector and provider setup is verified.

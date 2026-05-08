@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from voice_comms_chip.spark_hook import (
     handle_voice_install_hook,
     handle_voice_onboard_hook,
@@ -56,18 +58,23 @@ def _payload(tmp_path, **overrides):
     return payload
 
 
-def test_voice_status_reports_ready_when_provider_is_usable(tmp_path):
+def test_voice_status_default_requires_local_faster_whisper(tmp_path):
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
         result = handle_voice_status_hook(_payload(tmp_path))
     assert result["returncode"] == 0
-    assert result["result"]["ready"] is True
-    assert "Voice chip is ready." in result["result"]["reply_text"]
+    assert result["result"]["ready"] is False
+    assert result["result"]["provider_id"] == "local_faster_whisper"
+    assert "local faster-whisper transcription is the default Telegram voice path" in result["result"]["reason"]
+    assert "Voice chip is not ready yet." in result["result"]["reply_text"]
 
 
 def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("CUSTOM_API_KEY=custom-test-key\n", encoding="utf-8")
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
+    with patch.dict("os.environ", {"VOICE_TRANSCRIBE_PROVIDER": "builder"}, clear=False), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        return_value=False,
+    ):
         result = handle_voice_status_hook(
             {
                 "builder_env_file_path": str(env_file),
@@ -412,6 +419,16 @@ def test_cli_main_accepts_utf8_sig_payload(tmp_path):
 
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     captured = {}
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+    )
+    Path(payload["builder_env_file_path"]).write_text(
+        f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\nVOICE_TRANSCRIBE_PROVIDER=openai\n",
+        encoding="utf-8",
+    )
 
     def fake_urlopen(request, timeout: int = 30):
         captured["url"] = request.full_url
@@ -423,14 +440,7 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
         "voice_comms_chip.spark_hook.urllib.request.urlopen",
         side_effect=fake_urlopen,
     ):
-        result = handle_voice_transcribe_hook(
-            _payload(
-                tmp_path,
-                audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
-                filename="telegram-voice.ogg",
-                mime_type="audio/ogg",
-            )
-        )
+        result = handle_voice_transcribe_hook(payload)
 
     headers = {str(key).lower(): value for key, value in captured["headers"].items()}
     assert result["returncode"] == 0
@@ -443,8 +453,7 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     assert b"fake-ogg-bytes" in captured["body"]
 
 
-def test_voice_transcribe_auto_uses_openai_when_local_is_unavailable(tmp_path):
-    captured = {}
+def test_voice_transcribe_auto_requires_local_faster_whisper_when_local_is_unavailable(tmp_path):
     payload = _payload(
         tmp_path,
         audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
@@ -464,20 +473,13 @@ def test_voice_transcribe_auto_uses_openai_when_local_is_unavailable(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_urlopen(request, timeout: int = 30):
-        captured["url"] = request.full_url
-        return _FakeBinaryHttpResponse(json.dumps({"text": "Hosted auto fallback"}).encode("utf-8"))
-
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
         "voice_comms_chip.spark_hook.urllib.request.urlopen",
-        side_effect=fake_urlopen,
+        side_effect=AssertionError("hosted transcription should require explicit provider opt-in"),
     ):
-        result = handle_voice_transcribe_hook(payload)
+        with pytest.raises(ValueError, match="Local faster-whisper transcription is the default"):
+            handle_voice_transcribe_hook(payload)
 
-    assert result["returncode"] == 0
-    assert result["result"]["mode"] == "provider"
-    assert result["result"]["transcript_text"] == "Hosted auto fallback"
-    assert captured["url"] == "https://api.openai.com/v1/audio/transcriptions"
 
 
 def test_voice_transcribe_prefers_local_faster_whisper_without_openai_call_when_available(tmp_path):
@@ -505,19 +507,22 @@ def test_voice_transcribe_prefers_local_faster_whisper_without_openai_call_when_
 
 
 def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_path):
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+        fallback_mode="deterministic",
+    )
+    Path(payload["builder_env_file_path"]).write_text(
+        f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\nVOICE_TRANSCRIBE_PROVIDER=openai\n",
+        encoding="utf-8",
+    )
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
         "voice_comms_chip.spark_hook.urllib.request.urlopen",
         side_effect=RuntimeError("simulated provider outage"),
     ):
-        result = handle_voice_transcribe_hook(
-            _payload(
-                tmp_path,
-                audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
-                filename="telegram-voice.ogg",
-                mime_type="audio/ogg",
-                fallback_mode="deterministic",
-            )
-        )
+        result = handle_voice_transcribe_hook(payload)
 
     assert result["returncode"] == 0
     assert result["result"]["mode"] == "deterministic_fallback"
