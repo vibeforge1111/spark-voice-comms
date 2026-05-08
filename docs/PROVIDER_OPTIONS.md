@@ -13,6 +13,7 @@ Use this page to help users choose a voice setup.
 | Best free local voice quality | faster-whisper | Kokoro | local neural TTS without a hosted provider key |
 | Production Telegram bot | OpenAI-compatible STT | ElevenLabs | simpler quality bar and Telegram-friendly audio output |
 | Lowest operational complexity | OpenAI-compatible STT | ElevenLabs | hosted providers own model/runtime reliability |
+| Realtime voice agent feel | local or OpenAI-compatible STT | GPT Realtime 2 | expressive OpenAI speech model over a server-side Realtime socket |
 | Existing Z.ai account | OpenAI-compatible or local STT | Z.ai GLM-TTS after adapter support lands | Z.ai is useful for GLM voice output, but not wired yet |
 | Existing MiniMax account | OpenAI-compatible or local STT | MiniMax Speech after adapter support lands | MiniMax is useful for expressive voice, but not wired yet |
 
@@ -150,6 +151,50 @@ Tradeoffs:
 - provider spend
 - provider account setup
 - users must keep credentials out of Telegram chat and git
+
+### TTS: OpenAI GPT Realtime 2
+
+GPT Realtime 2 is a hosted OpenAI voice model for realtime speech interactions. In this chip, it is exposed as a server-side `voice.speak` provider that opens a Realtime WebSocket, asks for audio output, and returns WAV audio for the channel adapter to deliver or convert.
+
+Install the optional WebSocket dependency:
+
+```bash
+python -m pip install -e ".[openai-realtime]"
+```
+
+Configure secrets locally, not in Telegram:
+
+```text
+OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
+VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT=low
+```
+
+Payload:
+
+```json
+{
+  "text": "Say one warm sentence with GPT Realtime 2.",
+  "tts": {
+    "provider_id": "openai-realtime"
+  }
+}
+```
+
+Useful when:
+
+- users already use OpenAI and want a higher-end voice-agent path
+- the agent's spoken style matters as much as raw TTS quality
+- server-side Realtime access is acceptable for the deployment
+
+Tradeoffs:
+
+- provider spend
+- requires the optional `websocket-client` package
+- output is WAV, so Telegram voice-note delivery may still need channel-side conversion
+- this is a realtime model path, not a drop-in OpenAI-compatible `/audio/speech` clone
 
 ## Planned Provider Adapters
 

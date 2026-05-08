@@ -75,6 +75,14 @@ This file tracks which providers are actually safe to use for `spark-voice-comms
   - voice id source: local `VOICE_TTS_ELEVENLABS_VOICE_ID`, hook payload `tts.voice_id`, or a private profile override
   - fallback behavior: retry once with a resolved fallback voice when the primary voice id is missing
 
+- `openai-realtime`
+  - status: hosted GPT Realtime 2 voice provider path
+  - expected endpoint: Realtime WebSocket API with `gpt-realtime-2`
+  - expected auth: OpenAI API key from env-backed secret
+  - voice id source: local `VOICE_TTS_OPENAI_REALTIME_VOICE` or hook payload `tts.voice_id`
+  - output: WAV from streamed PCM audio, with channel-side conversion when Telegram voice-note media is required
+  - policy: use as an explicit realtime voice adapter, not as a pretend `/audio/speech` clone
+
 ### Not Implemented Yet
 
 - `zai`

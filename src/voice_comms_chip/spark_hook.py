@@ -14,6 +14,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -27,10 +28,17 @@ DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TTS_PROVIDER = "elevenlabs"
 LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
+OPENAI_REALTIME_TTS_PROVIDER = "openai-realtime"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64"
+DEFAULT_OPENAI_REALTIME_WS_URL = "wss://api.openai.com/v1/realtime"
+DEFAULT_OPENAI_REALTIME_MODEL_ID = "gpt-realtime-2"
+DEFAULT_OPENAI_REALTIME_VOICE = "sage"
+DEFAULT_OPENAI_REALTIME_SAMPLE_RATE = 24000
+DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS = 45
+OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
 ENV_TTS_MODEL_ID = "VOICE_TTS_ELEVENLABS_MODEL_ID"
@@ -44,6 +52,13 @@ ENV_KOKORO_VOICES_PATH = "VOICE_TTS_KOKORO_VOICES_PATH"
 ENV_KOKORO_VOICE = "VOICE_TTS_KOKORO_VOICE"
 ENV_KOKORO_SPEED = "VOICE_TTS_KOKORO_SPEED"
 ENV_KOKORO_LANG = "VOICE_TTS_KOKORO_LANG"
+ENV_OPENAI_REALTIME_SECRET_REF = "VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF"
+ENV_OPENAI_REALTIME_WS_URL = "VOICE_TTS_OPENAI_REALTIME_WS_URL"
+ENV_OPENAI_REALTIME_MODEL_ID = "VOICE_TTS_OPENAI_REALTIME_MODEL_ID"
+ENV_OPENAI_REALTIME_VOICE = "VOICE_TTS_OPENAI_REALTIME_VOICE"
+ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT"
+ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
+ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -69,6 +84,13 @@ VOICE_ENV_KEYS = {
     ENV_KOKORO_VOICE,
     ENV_KOKORO_SPEED,
     ENV_KOKORO_LANG,
+    ENV_OPENAI_REALTIME_SECRET_REF,
+    ENV_OPENAI_REALTIME_WS_URL,
+    ENV_OPENAI_REALTIME_MODEL_ID,
+    ENV_OPENAI_REALTIME_VOICE,
+    ENV_OPENAI_REALTIME_REASONING_EFFORT,
+    ENV_OPENAI_REALTIME_INSTRUCTIONS,
+    ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
 }
 
 
@@ -480,14 +502,23 @@ def _paid_voice_recommendation(
         lead = "For high-quality paid voice, MiniMax is worth supporting, but I would not mark it ready until the speech adapter is real."
     elif provider_note["provider"] == "zai":
         lead = "For a Z.ai/GLM-centered Spark, I would keep GLM-TTS on the roadmap and use a verified voice path today."
+    elif snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+        lead = "For paid voice, GPT Realtime 2 is already configured, so I would use that for the more voice-agent-like path."
     elif snapshot["paid_stt"]["ready"] or snapshot["paid_tts"]["ready"]:
         lead = "For paid voice, I would build on the hosted pieces already visible instead of starting from scratch."
     else:
         lead = "For paid voice, I would optimize for reliable Telegram delivery first, then voice character."
+    if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+        recommendation = "My recommendation here is GPT Realtime 2 for expressive hosted voice, while keeping ElevenLabs as the simpler classic TTS fallback."
+    else:
+        recommendation = (
+            "My default recommendation today is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
+            "and MiniMax or Z.ai only through explicit adapters once they are verified."
+        )
     return (
         f"{lead}\n"
         f"{provider_note['note']}\n"
-        "My default recommendation today is OpenAI-compatible STT plus ElevenLabs TTS, with MiniMax and Z.ai as explicit adapters rather than guesses."
+        f"{recommendation}"
         + (f"\n{preference_note['note']}" if preference_note.get("note") else "")
     )
 
@@ -531,6 +562,8 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
     elif request["provider_id"] == LOCAL_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
+    elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
+        audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
     return {
@@ -720,7 +753,8 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     local_tts_status = _local_tts_status(env_map=env_map)
     local_tts_ready = local_tts_status["ready"]
     paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
-    paid_tts_ready = bool(env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID))
+    paid_tts_status = _paid_tts_status(env_map=env_map)
+    paid_tts_ready = paid_tts_status["ready"]
     return {
         "env": {"status": env_note, "provided": bool(env_file_path)},
         "local_stt": {
@@ -741,7 +775,8 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "paid_tts": {
             "ready": paid_tts_ready,
-            "status": "configured for ElevenLabs TTS" if paid_tts_ready else f"add ELEVENLABS_API_KEY and {ENV_TTS_VOICE_ID}",
+            "status": paid_tts_status["status"],
+            "provider": paid_tts_status["provider"],
             "cost": "provider usage",
         },
     }
@@ -773,6 +808,28 @@ def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
         "ready": False,
         "provider": "none",
         "status": "install optional Kokoro for better offline TTS, or `pyttsx3` for basic system voices",
+    }
+
+
+def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
+    if env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID):
+        return {
+            "ready": True,
+            "provider": "elevenlabs",
+            "status": "configured for ElevenLabs TTS",
+        }
+    openai_secret_ref = env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY"
+    openai_realtime_selected = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower() in OPENAI_REALTIME_PROVIDER_ALIASES
+    if openai_realtime_selected and env_map.get(openai_secret_ref):
+        return {
+            "ready": True,
+            "provider": OPENAI_REALTIME_TTS_PROVIDER,
+            "status": "configured for OpenAI GPT Realtime 2 voice",
+        }
+    return {
+        "ready": False,
+        "provider": "none",
+        "status": f"add ElevenLabs voice settings, or set {ENV_TTS_PROVIDER}=openai-realtime with an OpenAI key for GPT Realtime 2",
     }
 
 
@@ -919,6 +976,8 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
         return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
+    if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
+        return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
         raise ValueError(f"voice.speak does not yet support provider '{provider_id}'.")
     if not env_file_path:
@@ -1026,6 +1085,46 @@ def _resolve_local_tts_request(
         "rate": rate,
         "volume": volume,
         "voice_name": voice_name,
+    }
+
+
+def _resolve_openai_realtime_tts_request(
+    *,
+    tts: dict[str, Any],
+    env_map: dict[str, str],
+    text: str,
+    surface: str,
+) -> dict[str, Any]:
+    secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
+    if not secret_env_ref:
+        raise ValueError("voice.speak requires a secret_env_ref for OpenAI Realtime.")
+    secret_value = env_map.get(secret_env_ref)
+    if not secret_value:
+        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+    timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
+    sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+    model_id = str(
+        tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
+    ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
+    return {
+        "provider_id": OPENAI_REALTIME_TTS_PROVIDER,
+        "surface": surface,
+        "text": text,
+        "base_url": str(tts.get("base_url") or env_map.get(ENV_OPENAI_REALTIME_WS_URL) or DEFAULT_OPENAI_REALTIME_WS_URL).strip()
+        or DEFAULT_OPENAI_REALTIME_WS_URL,
+        "secret_value": secret_value,
+        "model_id": model_id,
+        "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_OPENAI_REALTIME_VOICE) or DEFAULT_OPENAI_REALTIME_VOICE).strip()
+        or DEFAULT_OPENAI_REALTIME_VOICE,
+        "reasoning_effort": str(tts.get("reasoning_effort") or env_map.get(ENV_OPENAI_REALTIME_REASONING_EFFORT) or "").strip(),
+        "instructions": str(tts.get("instructions") or env_map.get(ENV_OPENAI_REALTIME_INSTRUCTIONS) or "Speak naturally and keep this reply concise.").strip(),
+        "sample_rate": sample_rate,
+        "timeout_seconds": max(5.0, min(120.0, float(timeout_seconds))),
+        "mime_type": "audio/wav",
+        "file_extension": ".wav",
+        "voice_compatible": False,
     }
 
 
@@ -1153,6 +1252,100 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     return audio_bytes, str(request.get("voice_id") or DEFAULT_KOKORO_VOICE)
 
 
+def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    try:
+        websocket = importlib.import_module("websocket")
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
+        ) from exc
+
+    model_id = str(request["model_id"]).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
+    url = _openai_realtime_ws_url(str(request["base_url"]), model_id=model_id)
+    voice_id = str(request.get("voice_id") or DEFAULT_OPENAI_REALTIME_VOICE).strip() or DEFAULT_OPENAI_REALTIME_VOICE
+    sample_rate = int(request.get("sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+    timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
+    headers = [
+        "Authorization: Bearer " + str(request["secret_value"]),
+        "OpenAI-Beta: realtime=v1",
+    ]
+    ws = websocket.create_connection(url, header=headers, timeout=timeout)
+    audio_chunks: list[bytes] = []
+    fallback_audio_chunks: list[bytes] = []
+    try:
+        session_payload: dict[str, Any] = {
+            "type": "session.update",
+            "session": {
+                "type": "realtime",
+                "model": model_id,
+                "output_modalities": ["audio"],
+                "audio": {
+                    "output": {
+                        "format": {"type": "audio/pcm", "rate": sample_rate},
+                        "voice": voice_id,
+                    }
+                },
+            },
+        }
+        if request.get("instructions"):
+            session_payload["session"]["instructions"] = str(request["instructions"])
+        reasoning_effort = str(request.get("reasoning_effort") or "").strip()
+        if reasoning_effort:
+            session_payload["session"]["reasoning"] = {"effort": reasoning_effort}
+        ws.send(json.dumps(session_payload))
+        ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {
+                        "conversation": "none",
+                        "output_modalities": ["audio"],
+                        "audio": {
+                            "output": {
+                                "format": {"type": "audio/pcm", "rate": sample_rate},
+                                "voice": voice_id,
+                            }
+                        },
+                        "input": [
+                            {
+                                "type": "message",
+                                "role": "user",
+                                "content": [{"type": "input_text", "text": str(request["text"])}],
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        while True:
+            raw_message = ws.recv()
+            if not raw_message:
+                continue
+            event = json.loads(raw_message)
+            event_type = str(event.get("type") or "")
+            if event_type == "error":
+                error = event.get("error") if isinstance(event.get("error"), dict) else {}
+                message = str(error.get("message") or event)
+                raise RuntimeError(f"OpenAI Realtime TTS request failed: {message}")
+            if event_type == "response.output_audio.delta":
+                delta = str(event.get("delta") or "")
+                if delta:
+                    audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+            elif event_type == "response.content_part.done":
+                part = event.get("part") if isinstance(event.get("part"), dict) else {}
+                audio = str(part.get("audio") or "")
+                if audio:
+                    fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+            elif event_type == "response.done":
+                break
+    finally:
+        ws.close()
+    pcm_audio = b"".join(audio_chunks or fallback_audio_chunks)
+    if not pcm_audio:
+        raise RuntimeError("OpenAI Realtime TTS returned empty audio.")
+    return _pcm16_to_wav(pcm_audio, sample_rate=sample_rate), voice_id
+
+
 def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, bool]:
     normalized = str(output_format or "").strip().lower()
     if normalized.startswith("opus") or "ogg" in normalized:
@@ -1160,6 +1353,27 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
     if normalized.startswith("pcm"):
         return ("audio/wav", ".wav", False)
     return ("audio/mpeg", ".mp3", False)
+
+
+def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
+    normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+    if normalized.startswith("http://"):
+        normalized = "ws://" + normalized[len("http://") :]
+    elif normalized.startswith("https://"):
+        normalized = "wss://" + normalized[len("https://") :]
+    if not normalized.endswith("/realtime"):
+        normalized = f"{normalized}/realtime"
+    return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
+
+
+def _pcm16_to_wav(pcm_audio: bytes, *, sample_rate: int) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(int(sample_rate))
+        wav_file.writeframes(pcm_audio)
+    return buffer.getvalue()
 
 
 def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | None:

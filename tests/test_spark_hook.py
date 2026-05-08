@@ -5,6 +5,7 @@ import io
 import json
 import sys
 import urllib.error
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -768,6 +769,82 @@ def test_voice_speak_uses_env_default_tts_provider_for_kokoro(tmp_path):
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"env-kokoro-wav"
     assert captured["model_path"] == str(model_path)
     assert captured["voices_path"] == str(voices_path)
+
+
+def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
+    sent_messages: list[dict[str, object]] = []
+    pcm_delta = base64.b64encode(b"\x00\x00\x01\x00").decode("ascii")
+
+    class FakeRealtimeSocket:
+        def __init__(self) -> None:
+            self._events = iter(
+                [
+                    json.dumps({"type": "session.created"}),
+                    json.dumps({"type": "response.output_audio.delta", "delta": pcm_delta}),
+                    json.dumps({"type": "response.done"}),
+                ]
+            )
+
+        def send(self, message: str) -> None:
+            sent_messages.append(json.loads(message))
+
+        def recv(self) -> str:
+            return next(self._events)
+
+        def close(self) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+
+    def fake_create_connection(url: str, *, header: list[str], timeout: float):
+        captured["url"] = url
+        captured["header"] = header
+        captured["timeout"] = timeout
+        return FakeRealtimeSocket()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TTS_PROVIDER=openai-realtime",
+                "VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2",
+                "VOICE_TTS_OPENAI_REALTIME_VOICE=sage",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with patch.dict(
+        sys.modules,
+        {"websocket": SimpleNamespace(create_connection=fake_create_connection)},
+    ):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "surface": "telegram",
+                "text": "Use the new realtime voice.",
+            }
+        )
+
+    audio_bytes = base64.b64decode(result["result"]["audio_base64"].encode("ascii"))
+    with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+        assert wav_file.getframerate() == 24000
+        assert wav_file.getnchannels() == 1
+        assert wav_file.getsampwidth() == 2
+        assert wav_file.readframes(2) == b"\x00\x00\x01\x00"
+    assert result["returncode"] == 0
+    assert result["result"]["provider_id"] == "openai-realtime"
+    assert result["result"]["model_id"] == "gpt-realtime-2"
+    assert result["result"]["voice_id"] == "sage"
+    assert result["result"]["mime_type"] == "audio/wav"
+    assert result["result"]["voice_compatible"] is False
+    assert captured["url"] == "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
+    assert "Authorization: Bearer " + FAKE_OPENAI_KEY in captured["header"]
+    assert sent_messages[0]["type"] == "session.update"
+    assert sent_messages[1]["type"] == "response.create"
+    assert sent_messages[1]["response"]["input"][0]["content"][0]["text"] == "Use the new realtime voice."
 
 
 def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(tmp_path):

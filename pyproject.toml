@@ -21,6 +21,7 @@ dev = ["pytest>=8.0"]
 local-tts = ["pyttsx3>=2.90"]
 local-kokoro = ["kokoro-onnx>=0.5.0", "soundfile>=0.12"]
 local-stt = ["faster-whisper>=1.0"]
+openai-realtime = ["websocket-client>=1.8.0"]
 local = ["pyttsx3>=2.90", "kokoro-onnx>=0.5.0", "soundfile>=0.12", "faster-whisper>=1.0"]
 
 [tool.setuptools.packages.find]

@@ -115,6 +115,21 @@ Set `VOICE_TTS_PROVIDER=kokoro`, `VOICE_TTS_KOKORO_MODEL_PATH`, and `VOICE_TTS_K
 
 Local TTS is useful for zero-cost setup and desktop playback. Kokoro is the preferred private/free quality path when model assets are configured. Hosted TTS is still the simpler path for Telegram voice-note delivery.
 
+OpenAI GPT Realtime 2 can also be used as a hosted voice provider:
+
+```bash
+python -m pip install -e ".[openai-realtime]"
+```
+
+```text
+OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
+VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+```
+
+This path uses the Realtime WebSocket API and returns WAV audio to the channel adapter. Keep the key in Builder's local env/secret layer, never in Telegram.
+
 ## Runtime Boundary
 
 Builder should:

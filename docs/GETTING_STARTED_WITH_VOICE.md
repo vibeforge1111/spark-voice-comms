@@ -120,6 +120,22 @@ VOICE_TTS_KOKORO_LANG=en-us
 
 Then call `voice.speak` with `tts.provider_id=kokoro`. Kokoro keeps TTS local and does not require a provider key.
 
+For OpenAI GPT Realtime 2 hosted voice:
+
+```bash
+python -m pip install -e ".[openai-realtime]"
+```
+
+```text
+OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
+VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT=low
+```
+
+Spark should present this as a premium hosted voice-agent path. Do not ask users to paste the key into Telegram; guide them to the local Builder env file or secret layer.
+
 ## 5. Run A Safe Local Smoke
 
 You can test transcription flow without a real provider by using deterministic fallback mode:

@@ -89,6 +89,19 @@ VOICE_TTS_ELEVENLABS_VOICE_ID=<your ElevenLabs voice id>
 VOICE_TTS_ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
 ```
 
+For OpenAI GPT Realtime 2 voice, install the optional dependency and use the OpenAI Realtime provider instead of ElevenLabs:
+
+```bash
+python -m pip install -e ".[openai-realtime]"
+```
+
+```text
+OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
+VOICE_TTS_OPENAI_REALTIME_VOICE=sage
+```
+
 Then run:
 
 ```bash
