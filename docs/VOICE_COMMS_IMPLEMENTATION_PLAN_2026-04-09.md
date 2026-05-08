@@ -23,7 +23,7 @@ Already done in this repo:
 - canonical `spark_core` voice profile support
 - provider compatibility documentation
 - deterministic and local STT fallback paths
-- local/free TTS via optional `pyttsx3`
+- local/free TTS via optional Kokoro or `pyttsx3`
 
 Already done in Builder:
 - Telegram voice/audio messages are detected

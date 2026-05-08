@@ -5,6 +5,7 @@ import base64
 import hashlib
 import importlib
 import importlib.util
+import io
 import json
 import os
 import tempfile
@@ -23,6 +24,7 @@ SUPPORTED_FALLBACK_MODES = {"deterministic"}
 DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TTS_PROVIDER = "elevenlabs"
 LOCAL_TTS_PROVIDER = "pyttsx3"
+LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
@@ -34,6 +36,13 @@ ENV_TTS_VOICE_NAME = "VOICE_TTS_ELEVENLABS_VOICE_NAME"
 ENV_LOCAL_TTS_VOICE_NAME = "VOICE_TTS_LOCAL_VOICE_NAME"
 ENV_LOCAL_TTS_RATE = "VOICE_TTS_LOCAL_RATE"
 ENV_LOCAL_TTS_VOLUME = "VOICE_TTS_LOCAL_VOLUME"
+ENV_KOKORO_MODEL_PATH = "VOICE_TTS_KOKORO_MODEL_PATH"
+ENV_KOKORO_VOICES_PATH = "VOICE_TTS_KOKORO_VOICES_PATH"
+ENV_KOKORO_VOICE = "VOICE_TTS_KOKORO_VOICE"
+ENV_KOKORO_SPEED = "VOICE_TTS_KOKORO_SPEED"
+ENV_KOKORO_LANG = "VOICE_TTS_KOKORO_LANG"
+DEFAULT_KOKORO_VOICE = "af_sarah"
+DEFAULT_KOKORO_LANG = "en-us"
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -312,7 +321,9 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
-    if request["provider_id"] == LOCAL_TTS_PROVIDER:
+    if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
+        audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
+    elif request["provider_id"] == LOCAL_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
     else:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
@@ -464,7 +475,8 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             env_note = f"Builder env file unavailable: {exc}"
     local_stt_ready = _local_faster_whisper_available()
-    local_tts_ready = _local_pyttsx3_available()
+    local_tts_status = _local_tts_status(env_map=env_map)
+    local_tts_ready = local_tts_status["ready"]
     paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
     paid_tts_ready = bool(env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID))
     return {
@@ -476,7 +488,8 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "local_tts": {
             "ready": local_tts_ready,
-            "status": "ready via pyttsx3" if local_tts_ready else "install optional `pyttsx3` for offline TTS",
+            "status": local_tts_status["status"],
+            "provider": local_tts_status["provider"],
             "cost": "free/local",
         },
         "paid_stt": {
@@ -489,6 +502,35 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             "status": "configured for ElevenLabs TTS" if paid_tts_ready else f"add ELEVENLABS_API_KEY and {ENV_TTS_VOICE_ID}",
             "cost": "provider usage",
         },
+    }
+
+
+def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
+    if _local_kokoro_ready(env_map=env_map):
+        return {
+            "ready": True,
+            "provider": LOCAL_KOKORO_TTS_PROVIDER,
+            "status": "ready via Kokoro local neural TTS",
+        }
+    if _local_kokoro_package_available():
+        return {
+            "ready": False,
+            "provider": LOCAL_KOKORO_TTS_PROVIDER,
+            "status": (
+                f"configure {ENV_KOKORO_MODEL_PATH} and {ENV_KOKORO_VOICES_PATH} "
+                "for Kokoro local neural TTS"
+            ),
+        }
+    if _local_pyttsx3_available():
+        return {
+            "ready": True,
+            "provider": LOCAL_TTS_PROVIDER,
+            "status": "ready via pyttsx3 basic system TTS",
+        }
+    return {
+        "ready": False,
+        "provider": "none",
+        "status": "install optional Kokoro for better offline TTS, or `pyttsx3` for basic system voices",
     }
 
 
@@ -612,6 +654,8 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     surface = str(payload.get("surface") or "").strip().lower()
     provider_id = str(tts.get("provider_id") or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
     env_map = _read_env_map(env_file_path=env_file_path) if env_file_path else {}
+    if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
+        return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
         return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
@@ -661,6 +705,40 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
             "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
             "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
         },
+    }
+
+
+def _resolve_kokoro_tts_request(
+    *,
+    tts: dict[str, Any],
+    env_map: dict[str, str],
+    text: str,
+    surface: str,
+) -> dict[str, Any]:
+    model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
+    voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+    if not model_path or not voices_path:
+        raise ValueError(
+            f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
+        )
+    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
+    if speed is None:
+        speed = 1.0
+    return {
+        "provider_id": LOCAL_KOKORO_TTS_PROVIDER,
+        "surface": surface,
+        "text": text,
+        "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_KOKORO_VOICE) or DEFAULT_KOKORO_VOICE).strip()
+        or DEFAULT_KOKORO_VOICE,
+        "model_id": Path(model_path).name or "kokoro-v1.0.onnx",
+        "mime_type": "audio/wav",
+        "file_extension": ".wav",
+        "voice_compatible": False,
+        "model_path": model_path,
+        "voices_path": voices_path,
+        "speed": max(0.5, min(2.0, float(speed))),
+        "lang": str(tts.get("lang") or env_map.get(ENV_KOKORO_LANG) or DEFAULT_KOKORO_LANG).strip()
+        or DEFAULT_KOKORO_LANG,
     }
 
 
@@ -787,6 +865,33 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
                 pass
 
 
+def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    try:
+        kokoro_module = importlib.import_module("kokoro_onnx")
+        soundfile = importlib.import_module("soundfile")
+    except Exception as exc:
+        raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
+    model_path = Path(str(request.get("model_path") or ""))
+    voices_path = Path(str(request.get("voices_path") or ""))
+    if not model_path.exists():
+        raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
+    if not voices_path.exists():
+        raise RuntimeError(f"Kokoro voices file was not found at '{voices_path}'.")
+    kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
+    samples, sample_rate = kokoro.create(
+        request["text"],
+        voice=str(request.get("voice_id") or DEFAULT_KOKORO_VOICE),
+        speed=float(request.get("speed") or 1.0),
+        lang=str(request.get("lang") or DEFAULT_KOKORO_LANG),
+    )
+    buffer = io.BytesIO()
+    soundfile.write(buffer, samples, int(sample_rate), format="WAV")
+    audio_bytes = buffer.getvalue()
+    if not audio_bytes:
+        raise RuntimeError("Kokoro TTS returned empty audio.")
+    return audio_bytes, str(request.get("voice_id") or DEFAULT_KOKORO_VOICE)
+
+
 def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, bool]:
     normalized = str(output_format or "").strip().lower()
     if normalized.startswith("opus") or "ogg" in normalized:
@@ -854,6 +959,18 @@ def _local_faster_whisper_available() -> bool:
 
 def _local_pyttsx3_available() -> bool:
     return importlib.util.find_spec("pyttsx3") is not None
+
+
+def _local_kokoro_package_available() -> bool:
+    return importlib.util.find_spec("kokoro_onnx") is not None and importlib.util.find_spec("soundfile") is not None
+
+
+def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
+    if not _local_kokoro_package_available():
+        return False
+    model_path = str(env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
+    voices_path = str(env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+    return bool(model_path and voices_path and Path(model_path).exists() and Path(voices_path).exists())
 
 
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:

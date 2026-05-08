@@ -1,0 +1,6 @@
+{
+  "text": "Kokoro local voice smoke test.",
+  "tts": {
+    "provider_id": "kokoro"
+  }
+}

@@ -84,6 +84,24 @@ python -m pip install -e ".[local-tts]"
 
 Then call `voice.speak` with `tts.provider_id=pyttsx3`. Local TTS uses the operating system's installed voices and does not require a provider key.
 
+For a higher-quality free local TTS path, use Kokoro:
+
+```bash
+python -m pip install -e ".[local-kokoro]"
+```
+
+Download the Kokoro ONNX model and voices file locally, then point Spark at those files through the Builder env file or secret/config layer:
+
+```text
+VOICE_TTS_KOKORO_MODEL_PATH=C:\path\to\kokoro-v1.0.onnx
+VOICE_TTS_KOKORO_VOICES_PATH=C:\path\to\voices-v1.0.bin
+VOICE_TTS_KOKORO_VOICE=af_sarah
+VOICE_TTS_KOKORO_SPEED=1.0
+VOICE_TTS_KOKORO_LANG=en-us
+```
+
+Then call `voice.speak` with `tts.provider_id=kokoro`. Kokoro keeps TTS local and does not require a provider key.
+
 ## 5. Run A Safe Local Smoke
 
 You can test transcription flow without a real provider by using deterministic fallback mode:
@@ -131,4 +149,5 @@ Before enabling voice for real users:
 | `voice.transcribe` says provider compatibility is unverified | Active provider is not OpenAI-compatible | Use OpenAI STT or configure an OpenAI-compatible endpoint |
 | `voice.speak` asks for a voice id | No `tts.voice_id` or `VOICE_TTS_ELEVENLABS_VOICE_ID` was supplied | Add a local ElevenLabs voice id |
 | Local TTS says `pyttsx3` is missing | The optional local TTS package is not installed | Run `python -m pip install -e ".[local-tts]"` |
+| Kokoro TTS asks for model assets | The optional package is installed but model paths are missing | Set `VOICE_TTS_KOKORO_MODEL_PATH` and `VOICE_TTS_KOKORO_VOICES_PATH` locally |
 | Telegram receives audio that does not play as a voice note | Wrong output format for Telegram | Use `surface=telegram` so the hook selects Opus output |

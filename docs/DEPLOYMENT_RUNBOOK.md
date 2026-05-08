@@ -67,6 +67,12 @@ Run local TTS if `pyttsx3` is installed:
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.speak --home "<spark-home>" --payload-file examples/voice_speak_local.json
 ```
 
+Run Kokoro local neural TTS after `VOICE_TTS_KOKORO_MODEL_PATH` and `VOICE_TTS_KOKORO_VOICES_PATH` are configured:
+
+```bash
+python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.speak --home "<spark-home>" --payload-file examples/voice_speak_kokoro.json
+```
+
 ## 5. Paid Provider Setup
 
 Add this to the host Spark environment or supported secret layer. Do not paste real keys into Telegram chat.

@@ -8,7 +8,7 @@ This playbook helps a Spark Telegram agent guide users through voice setup witho
 
 When a user asks for voice, the agent should help them choose one of two paths:
 
-- local/free: private, low-cost, good for first smoke tests
+- local/free: private, low-cost, good for first smoke tests; Kokoro is the preferred quality path when the machine can run it
 - paid/provider: higher quality and better Telegram delivery, but requires provider credentials
 
 The agent should keep setup conversational:
@@ -43,7 +43,7 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.on
 What this path means:
 
 - STT can use local faster-whisper when installed.
-- TTS can use `pyttsx3`, which speaks through installed system voices.
+- TTS can use Kokoro for better local neural speech, or `pyttsx3` for basic system voices.
 - Telegram voice-note delivery may still need host-side format conversion if the channel requires Opus voice notes.
 - Quality depends heavily on the machine and installed voices.
 
@@ -51,6 +51,12 @@ Safe smoke:
 
 ```bash
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.speak --home "<spark-home>" --payload-json "{\"text\":\"Voice setup smoke test.\",\"tts\":{\"provider_id\":\"pyttsx3\"}}"
+```
+
+Kokoro smoke after model paths are configured:
+
+```bash
+python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.speak --home "<spark-home>" --payload-json "{\"text\":\"Kokoro voice setup smoke test.\",\"tts\":{\"provider_id\":\"kokoro\"}}"
 ```
 
 ## Paid Provider Path
@@ -81,7 +87,7 @@ Use concise replies in Telegram:
 
 ```text
 Voice setup has two good paths:
-- Local/free: private and no provider spend, using faster-whisper + pyttsx3.
+- Local/free: private and no provider spend, using faster-whisper + Kokoro when available, or pyttsx3 for a basic smoke.
 - Paid/provider: better quality, using OpenAI-compatible STT + ElevenLabs TTS.
 
 Tell me `local` or `paid`, and I will walk you through only the missing pieces.

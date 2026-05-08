@@ -61,6 +61,13 @@ This file tracks which providers are actually safe to use for `spark-voice-comms
   - output: WAV
   - policy: useful for onboarding and local smoke tests; channel adapters may need conversion for Telegram voice notes
 
+- `kokoro`
+  - status: optional local/free neural TTS path
+  - expected runtime: `kokoro-onnx`, `soundfile`, and local Kokoro model/voices files
+  - expected auth: none
+  - output: WAV
+  - policy: preferred local quality path when users want private/free voice replies and can install local model assets
+
 - `elevenlabs`
   - status: first `voice.speak` provider path
   - expected endpoint: `/text-to-speech/{voice_id}`

@@ -9,7 +9,8 @@ Use this page to help users choose a voice setup.
 | User Goal | STT | TTS | Why |
 | --- | --- | --- | --- |
 | First local smoke | deterministic fallback or faster-whisper | pyttsx3 | no provider key, lowest friction |
-| Private/offline testing | faster-whisper | pyttsx3 | local execution, no network calls |
+| Private/offline testing | faster-whisper | Kokoro or pyttsx3 | local execution, no network calls |
+| Best free local voice quality | faster-whisper | Kokoro | local neural TTS without a hosted provider key |
 | Production Telegram bot | OpenAI-compatible STT | ElevenLabs | simpler quality bar and Telegram-friendly audio output |
 | Lowest operational complexity | OpenAI-compatible STT | ElevenLabs | hosted providers own model/runtime reliability |
 | Existing Z.ai account | OpenAI-compatible or local STT | Z.ai GLM-TTS after adapter support lands | Z.ai is useful for GLM voice output, but not wired yet |
@@ -36,6 +37,49 @@ Tradeoffs:
 - model download and CPU/GPU performance vary by machine
 - accuracy depends on chosen model size
 - host runtime still needs to allow local model execution
+
+### Local TTS: Kokoro
+
+Kokoro is the preferred local quality path when users want private/free voice replies that sound better than operating-system voices. It runs locally through `kokoro-onnx` and requires local model assets.
+
+Install:
+
+```bash
+python -m pip install -e ".[local-kokoro]"
+```
+
+Configure local paths in the Builder env file or secret/config layer:
+
+```text
+VOICE_TTS_KOKORO_MODEL_PATH=C:\path\to\kokoro-v1.0.onnx
+VOICE_TTS_KOKORO_VOICES_PATH=C:\path\to\voices-v1.0.bin
+VOICE_TTS_KOKORO_VOICE=af_sarah
+VOICE_TTS_KOKORO_SPEED=1.0
+VOICE_TTS_KOKORO_LANG=en-us
+```
+
+Payload:
+
+```json
+{
+  "text": "Kokoro local TTS smoke test.",
+  "tts": {
+    "provider_id": "kokoro"
+  }
+}
+```
+
+Useful when:
+
+- users want a no-key voice path with stronger voice quality
+- privacy and provider spend matter
+- the host machine can run local ONNX inference
+
+Tradeoffs:
+
+- users must install optional packages and model files locally
+- output is WAV, so Telegram voice-note delivery may still need channel-side conversion
+- first-run performance depends on CPU/GPU and model asset placement
 
 ### Local TTS: pyttsx3
 
@@ -136,4 +180,4 @@ VOICE_TTS_MINIMAX_MODEL=speech-2.8-hd
 VOICE_TTS_MINIMAX_VOICE_ID=<your MiniMax voice id>
 ```
 
-Until those adapters land, use OpenAI-compatible or local STT plus ElevenLabs or pyttsx3 TTS.
+Until those adapters land, use OpenAI-compatible or local STT plus Kokoro, ElevenLabs, or pyttsx3 TTS.
