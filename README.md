@@ -130,6 +130,8 @@ VOICE_TTS_OPENAI_REALTIME_VOICE=sage
 
 This path uses the Realtime WebSocket API and returns WAV audio to the channel adapter. Keep the key in Builder's local env/secret layer, never in Telegram.
 
+For the full provider env matrix and secure storage guidance, use [.env.example](./.env.example) and [docs/VOICE_ENV_SECURITY.md](./docs/VOICE_ENV_SECURITY.md).
+
 ## Runtime Boundary
 
 Builder should:

@@ -136,6 +136,8 @@ VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT=low
 
 Spark should present this as a premium hosted voice-agent path. Do not ask users to paste the key into Telegram; guide them to the local Builder env file or secret layer.
 
+Use `.env.example` as the public template and keep real values in Builder's local env file or Spark's secret layer. The secure storage rules are in [VOICE_ENV_SECURITY.md](./VOICE_ENV_SECURITY.md).
+
 ## 5. Run A Safe Local Smoke
 
 You can test transcription flow without a real provider by using deterministic fallback mode:

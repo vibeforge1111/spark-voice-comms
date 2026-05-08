@@ -44,6 +44,8 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.on
 
 If the user asks from Telegram and is an approved operator, route `/voice install kokoro` through `voice.install` before asking them to add model paths. Do not install hosted-provider SDKs or collect provider keys in Telegram.
 
+For provider keys, point users to their local Builder env file or Spark's secret layer. `.env.example` shows the safe shape for ElevenLabs, GPT Realtime 2, Kokoro, pyttsx3, and planned MiniMax/Z.ai slots. Codex CLI can run agent missions, but it is not a native STT/TTS provider for this chip.
+
 What this path means:
 
 - STT can use local faster-whisper when installed.
@@ -76,6 +78,15 @@ VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 ELEVENLABS_API_KEY=<your ElevenLabs API key>
 VOICE_TTS_ELEVENLABS_VOICE_ID=<your ElevenLabs voice id>
 VOICE_TTS_ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
+```
+
+For a more voice-agent-like hosted path, use GPT Realtime 2:
+
+```text
+VOICE_TTS_PROVIDER=openai-realtime
+OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
+VOICE_TTS_OPENAI_REALTIME_VOICE=sage
 ```
 
 Then:
