@@ -130,19 +130,11 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
             provider_note=provider_note,
             preference_note=preference_note,
         )
-    reply_text = "\n".join(
-        [
-            "Spark voice onboarding",
-            recommendation,
-            "",
-            "What I can see right now:",
-            f"- Local STT: {snapshot['local_stt']['status']}",
-            f"- Local TTS: {snapshot['local_tts']['status']}",
-            f"- Paid STT: {snapshot['paid_stt']['status']}",
-            f"- Paid TTS: {snapshot['paid_tts']['status']}",
-            "",
-            _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
-        ]
+    reply_text = _voice_onboarding_reply_text(
+        recommended_path=recommended_path,
+        snapshot=snapshot,
+        provider_note=provider_note,
+        preference_note=preference_note,
     )
     return {
         "returncode": 0,
@@ -214,19 +206,9 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
             }
         install_status = "installed"
     is_ready = _local_kokoro_package_available()
-    reply_text = "\n".join(
-        [
-            "Kokoro local TTS install",
-            "Status: already installed." if install_status == "already_installed" else "Status: package install completed.",
-            f"Python: {sys.executable}",
-            "",
-            "Next: add local model paths outside Telegram:",
-            f"- {ENV_KOKORO_MODEL_PATH}=<path to kokoro-v1.0.onnx>",
-            f"- {ENV_KOKORO_VOICES_PATH}=<path to voices-v1.0.bin>",
-            "",
-            "Then rerun `/voice onboard local`.",
-        ]
-    )
+    env_map = _safe_builder_env_map(payload)
+    kokoro_ready = _local_kokoro_ready(env_map=env_map)
+    reply_text = _kokoro_install_reply_text(install_status=install_status, kokoro_ready=kokoro_ready)
     return {
         "returncode": 0,
         "stdout": install_status,
@@ -238,9 +220,102 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "python": sys.executable,
             "installed": is_ready,
             "already_installed": was_ready,
+            "kokoro_ready": kokoro_ready,
             "pip_tail": pip_tail,
         },
     }
+
+
+def _voice_onboarding_reply_text(
+    *,
+    recommended_path: str,
+    snapshot: dict[str, Any],
+    provider_note: dict[str, str],
+    preference_note: dict[str, str],
+) -> str:
+    context_line = _voice_context_line(provider_note=provider_note, preference_note=preference_note)
+    next_step = _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot)
+    if recommended_path == "local_free":
+        if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+            voice_name = "Kokoro" if snapshot["local_tts"].get("provider") == LOCAL_KOKORO_TTS_PROVIDER else "the local system voice"
+            lines = [
+                "Good, the local voice path is ready.",
+                f"I can listen locally with faster-whisper and speak back with {voice_name} from this machine.",
+            ]
+        elif snapshot["local_stt"]["ready"]:
+            lines = [
+                "Local listening is ready. The speaking voice is the only missing piece.",
+                "I would finish Kokoro next, because it gives Spark a much nicer local voice without sending keys through Telegram.",
+            ]
+        else:
+            lines = [
+                "I would start with the local voice path for this Spark.",
+                "It keeps the first setup private and free, then we can add a hosted voice later if you want more polish.",
+            ]
+        lines.extend([context_line, "", next_step])
+        return "\n".join(line for line in lines if line is not None)
+    if recommended_path == "paid_provider":
+        lines = [
+            "For paid voice, I would optimize for reliable Telegram delivery first, then tune the voice character.",
+            "My current recommendation is hosted transcription plus a high-quality TTS provider like ElevenLabs, with MiniMax and Z.ai treated as explicit voice adapters once they are verified.",
+            context_line,
+            "",
+            next_step,
+        ]
+        return "\n".join(line for line in lines if line is not None)
+    lines = [
+        "I can help set up voice in the direction that fits this Spark best.",
+        "If you care most about privacy and zero spend, I would start local with faster-whisper and Kokoro. If you care most about the most natural voice, I would use a paid TTS provider after transcription is verified.",
+        context_line,
+        "",
+        next_step,
+    ]
+    return "\n".join(line for line in lines if line is not None)
+
+
+def _voice_context_line(*, provider_note: dict[str, str], preference_note: dict[str, str]) -> str | None:
+    preference = preference_note.get("preference")
+    if preference == "local":
+        return "This also matches the saved preference signal I can see: local/private tooling when it is good enough."
+    if preference == "paid_quality":
+        return "This matches the saved preference signal I can see: quality-first voice is worth a paid provider."
+    provider = provider_note.get("provider")
+    if provider and provider not in {"unknown", "openai"}:
+        label = provider_note.get("label") or provider
+        return f"I can see this Spark is currently running through {label}; I will not assume that provider has voice until its speech endpoint is verified."
+    return "No API keys belong in Telegram; keep provider secrets in Spark's local config or secret layer."
+
+
+def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if not env_file_path:
+        return {}
+    try:
+        return _read_env_map(env_file_path=env_file_path)
+    except Exception:
+        return {}
+
+
+def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> str:
+    installed_line = "Kokoro is already installed for this Spark." if install_status == "already_installed" else "Done, Kokoro is installed for this Spark."
+    if kokoro_ready:
+        return "\n".join(
+            [
+                installed_line,
+                "I can see the local voice model files too, so Spark can use Kokoro for private local voice replies from this machine.",
+                "",
+                "Try `/voice onboard local`, then ask for a short voice reply.",
+            ]
+        )
+    return "\n".join(
+        [
+            installed_line,
+            "One local setup step is still needed: connect the Kokoro model file and voices file on this computer.",
+            "Keep that part outside Telegram. Once those paths are saved in Spark's local config, I can use Kokoro for voice replies.",
+            "",
+            "Then rerun `/voice onboard local`.",
+        ]
+    )
 
 
 def _voice_preference_note(payload: dict[str, Any]) -> dict[str, str]:
@@ -385,11 +460,11 @@ def _guided_voice_recommendation(
 def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
     if recommended_path == "local_free":
         if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-            return "Next: run one local voice smoke, then send a short Telegram voice note."
+            return "Next: ask for one short voice reply, then send a quick Telegram voice note."
         return "Next: install the missing local voice package, then rerun `/voice onboard local`."
     if recommended_path == "paid_provider":
         if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
-            return "Next: verify `/voice status`, then run one `voice.speak` dry run."
+            return "Next: verify `/voice status`, then ask for one short paid voice reply."
         return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram."
     return "Next: tell me whether you care more about local/private or highest-quality voice, and I will recommend the setup."
 

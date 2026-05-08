@@ -135,8 +135,9 @@ def test_voice_onboard_guides_local_free_path():
     assert result["returncode"] == 0
     assert result["result"]["recommended_path"] == "local_free"
     assert result["metrics"]["local_ready"] == 1
-    assert "private/free path" in result["result"]["reply_text"]
-    assert "local voice smoke" in result["result"]["reply_text"]
+    assert "local voice path is ready" in result["result"]["reply_text"]
+    assert "one short voice reply" in result["result"]["reply_text"]
+    assert "What I can see right now" not in result["result"]["reply_text"]
 
 
 def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
@@ -155,7 +156,7 @@ def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
     assert result["returncode"] == 0
     assert result["metrics"]["local_ready"] == 1
     assert result["result"]["snapshot"]["local_tts"]["provider"] == "kokoro"
-    assert "Kokoro local neural TTS" in result["result"]["reply_text"]
+    assert "speak back with Kokoro" in result["result"]["reply_text"]
 
 
 def test_voice_onboard_uses_source_labeled_local_preference():
@@ -174,7 +175,7 @@ def test_voice_onboard_uses_source_labeled_local_preference():
 
     assert result["returncode"] == 0
     assert result["result"]["preference_note"]["preference"] == "local"
-    assert "preference context leans local/private" in result["result"]["reply_text"]
+    assert "saved preference signal" in result["result"]["reply_text"]
 
 
 def test_voice_install_kokoro_runs_local_pip_when_missing():
@@ -188,7 +189,7 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
         assert check is False
         return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
 
-    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", side_effect=[False, True]), patch(
+    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", side_effect=[False, True, True]), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
@@ -201,7 +202,10 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
     assert calls[0][1:4] == ["-m", "pip", "install"]
     assert "kokoro-onnx>=0.5.0" in calls[0]
     assert "soundfile>=0.12" in calls[0]
-    assert "VOICE_TTS_KOKORO_MODEL_PATH" in result["result"]["reply_text"]
+    assert "Kokoro is installed" in result["result"]["reply_text"]
+    assert "local setup step" in result["result"]["reply_text"]
+    assert "VOICE_TTS_KOKORO_MODEL_PATH" not in result["result"]["reply_text"]
+    assert "Python:" not in result["result"]["reply_text"]
 
 
 def test_voice_install_kokoro_skips_pip_when_already_installed():
