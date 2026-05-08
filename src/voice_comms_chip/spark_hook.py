@@ -75,14 +75,23 @@ VOICE_ENV_KEYS = {
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
-    lines = [
-        "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
-        f"Current state: {status['reason']}",
-        (
-            f"Voice profile: {profile_summary['profile_name']} "
-            f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
-        ),
-    ]
+    if status.get("local_ready"):
+        lines = [
+            "Local voice is ready.",
+            f"Current state: {status['reason']}",
+        ]
+        provider_note = str(status.get("provider_note") or "").strip()
+        if provider_note:
+            lines.append(f"Provider note: {provider_note}")
+    else:
+        lines = [
+            "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
+            f"Current state: {status['reason']}",
+        ]
+    lines.append(
+        f"Voice profile: {profile_summary['profile_name']} "
+        f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
+    )
     if status["ready"]:
         lines.append("Next: send a Telegram voice note and I will route it through this chip.")
     else:
@@ -611,11 +620,45 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    env_map = _process_voice_env_map()
+    if env_file_path:
+        try:
+            env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
+        except Exception:
+            pass
+    local_stt_ready = _local_faster_whisper_available()
+    local_tts_status = _local_tts_status(env_map=env_map)
+    if local_stt_ready and local_tts_status["ready"]:
+        provider_note = ""
+        provider_id = None
+        provider_kind = None
+        try:
+            provider = _resolve_provider(payload)
+            provider_id = provider["provider_id"]
+            provider_kind = provider["provider_kind"]
+            if provider["provider_kind"] == "custom":
+                provider_note = (
+                    "custom provider transcription compatibility is not verified yet; "
+                    "local faster-whisper is ready for transcription."
+                )
+        except Exception as exc:
+            provider_note = f"hosted transcription provider is not configured: {exc}"
+        return {
+            "ready": True,
+            "local_ready": True,
+            "reason": f"local transcription is ready via faster-whisper and speech replies are {local_tts_status['status']}",
+            "provider_note": provider_note,
+            "provider_id": provider_id,
+            "provider_kind": provider_kind,
+            "model": "local:faster-whisper",
+        }
     try:
         provider = _resolve_provider(payload)
     except Exception as exc:
         return {
             "ready": False,
+            "local_ready": False,
             "reason": str(exc),
             "provider_id": None,
             "provider_kind": None,
@@ -624,6 +667,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if provider["provider_kind"] == "custom":
         return {
             "ready": False,
+            "local_ready": False,
             "reason": (
                 "custom provider transcription compatibility is not verified yet. "
                 "This chip expects an OpenAI-compatible `/audio/transcriptions` endpoint."
@@ -634,6 +678,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "ready": True,
+        "local_ready": False,
         "reason": (
             f"transcription is configured via {provider['provider_id']} "
             f"using model {DEFAULT_TRANSCRIPTION_MODEL}"

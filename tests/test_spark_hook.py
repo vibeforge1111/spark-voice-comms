@@ -83,6 +83,51 @@ def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
     assert "custom provider transcription compatibility is not verified yet" in result["result"]["reason"]
 
 
+def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_path):
+    model_path = tmp_path / "kokoro-v1.0.onnx"
+    voices_path = tmp_path / "voices-v1.0.bin"
+    model_path.write_bytes(b"model")
+    voices_path.write_bytes(b"voices")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "CUSTOM_API_KEY=custom-test-key",
+                "VOICE_TTS_PROVIDER=kokoro",
+                f"VOICE_TTS_KOKORO_MODEL_PATH={model_path}",
+                f"VOICE_TTS_KOKORO_VOICES_PATH={voices_path}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ):
+        result = handle_voice_status_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "provider": {
+                    "provider_id": "custom",
+                    "provider_kind": "custom",
+                    "auth_method": "api_key_env",
+                    "execution_transport": "direct_http",
+                    "base_url": "https://api.example.com/v1",
+                    "secret_env_ref": "CUSTOM_API_KEY",
+                },
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["ready"] is True
+    assert result["result"]["local_ready"] is True
+    assert "Local voice is ready." in result["result"]["reply_text"]
+    assert "Provider note:" in result["result"]["reply_text"]
+    assert "Voice chip is not ready yet" not in result["result"]["reply_text"]
+
+
 def test_voice_status_prefers_dedicated_openai_transcription_env_over_custom_provider(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(
