@@ -135,7 +135,7 @@ def test_voice_onboard_guides_local_free_path():
     assert result["returncode"] == 0
     assert result["result"]["recommended_path"] == "local_free"
     assert result["metrics"]["local_ready"] == 1
-    assert "local voice path is ready" in result["result"]["reply_text"]
+    assert "local voice is ready" in result["result"]["reply_text"]
     assert "one short voice reply" in result["result"]["reply_text"]
     assert "What I can see right now" not in result["result"]["reply_text"]
 
@@ -157,6 +157,7 @@ def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
     assert result["metrics"]["local_ready"] == 1
     assert result["result"]["snapshot"]["local_tts"]["provider"] == "kokoro"
     assert "speak back with Kokoro" in result["result"]["reply_text"]
+    assert "currently running through" not in result["result"]["reply_text"]
 
 
 def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voice_keys(tmp_path):
@@ -274,6 +275,7 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     assert result["result"]["kokoro_ready"] is True
     assert "local voice model files" in result["result"]["reply_text"]
     assert "local setup step" not in result["result"]["reply_text"]
+    assert "\n\n" not in result["result"]["reply_text"]
     run.assert_not_called()
 
 

@@ -263,20 +263,23 @@ def _voice_onboarding_reply_text(
         if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
             voice_name = "Kokoro" if snapshot["local_tts"].get("provider") == LOCAL_KOKORO_TTS_PROVIDER else "the local system voice"
             lines = [
-                "Good, the local voice path is ready.",
-                f"I can listen locally with faster-whisper and speak back with {voice_name} from this machine.",
+                f"Good, local voice is ready. I can listen with faster-whisper and speak back with {voice_name} from this machine.",
+                next_step,
             ]
         elif snapshot["local_stt"]["ready"]:
             lines = [
                 "Local listening is ready. The speaking voice is the only missing piece.",
-                "I would finish Kokoro next, because it gives Spark a much nicer local voice without sending keys through Telegram.",
+                "I would finish Kokoro next because it gives Spark a much nicer local voice without sending keys through Telegram.",
+                context_line,
+                next_step,
             ]
         else:
             lines = [
                 "I would start with the local voice path for this Spark.",
                 "It keeps the first setup private and free, then we can add a hosted voice later if you want more polish.",
+                context_line,
+                next_step,
             ]
-        lines.extend([context_line, "", next_step])
         return "\n".join(line for line in lines if line is not None)
     if recommended_path == "paid_provider":
         lines = [
@@ -323,9 +326,7 @@ def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> st
     if kokoro_ready:
         return "\n".join(
             [
-                installed_line,
-                "I can see the local voice model files too, so Spark can use Kokoro for private local voice replies from this machine.",
-                "",
+                f"{installed_line} I can see the local voice model files too, so Spark can use Kokoro for private voice replies from this machine.",
                 "Try `/voice onboard local`, then ask for a short voice reply.",
             ]
         )
@@ -334,7 +335,6 @@ def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> st
             installed_line,
             "One local setup step is still needed: connect the Kokoro model file and voices file on this computer.",
             "Keep that part outside Telegram. Once those paths are saved in Spark's local config, I can use Kokoro for voice replies.",
-            "",
             "Then rerun `/voice onboard local`.",
         ]
     )
@@ -482,7 +482,7 @@ def _guided_voice_recommendation(
 def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
     if recommended_path == "local_free":
         if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-            return "Next: ask for one short voice reply, then send a quick Telegram voice note."
+            return "Next, ask for one short voice reply, then send a quick Telegram voice note."
         return "Next: install the missing local voice package, then rerun `/voice onboard local`."
     if recommended_path == "paid_provider":
         if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
