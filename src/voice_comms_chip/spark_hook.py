@@ -46,6 +46,30 @@ ENV_KOKORO_SPEED = "VOICE_TTS_KOKORO_SPEED"
 ENV_KOKORO_LANG = "VOICE_TTS_KOKORO_LANG"
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
+VOICE_ENV_KEYS = {
+    "OPENAI_API_KEY",
+    "VOICE_TRANSCRIBE_PROVIDER",
+    "VOICE_TRANSCRIBE_BASE_URL",
+    "VOICE_TRANSCRIBE_SECRET_ENV_REF",
+    "VOICE_TRANSCRIBE_LOCAL_MODEL",
+    "VOICE_TRANSCRIBE_LOCAL_LANGUAGE",
+    "VOICE_TRANSCRIBE_LOCAL_VAD_FILTER",
+    "VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE",
+    "ELEVENLABS_API_KEY",
+    ENV_TTS_PROVIDER,
+    ENV_TTS_BASE_URL,
+    ENV_TTS_MODEL_ID,
+    ENV_TTS_VOICE_ID,
+    ENV_TTS_VOICE_NAME,
+    ENV_LOCAL_TTS_VOICE_NAME,
+    ENV_LOCAL_TTS_RATE,
+    ENV_LOCAL_TTS_VOLUME,
+    ENV_KOKORO_MODEL_PATH,
+    ENV_KOKORO_VOICES_PATH,
+    ENV_KOKORO_VOICE,
+    ENV_KOKORO_SPEED,
+    ENV_KOKORO_LANG,
+}
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -288,12 +312,10 @@ def _voice_context_line(*, provider_note: dict[str, str], preference_note: dict[
 
 def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if not env_file_path:
-        return {}
     try:
-        return _read_env_map(env_file_path=env_file_path)
+        return _runtime_env_map(env_file_path=env_file_path or None)
     except Exception:
-        return {}
+        return _process_voice_env_map()
 
 
 def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> str:
@@ -618,11 +640,11 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    env_map: dict[str, str] = {}
+    env_map: dict[str, str] = _process_voice_env_map()
     env_note = "no Builder env file provided"
     if env_file_path:
         try:
-            env_map = _read_env_map(env_file_path=env_file_path)
+            env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
         except Exception as exc:
             env_note = f"Builder env file unavailable: {exc}"
@@ -734,9 +756,7 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
 
 def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[str, str] | None:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if not env_file_path:
-        return None
-    env_map = _read_env_map(env_file_path=env_file_path)
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
     provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
     base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
     secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()
@@ -768,7 +788,7 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
 
 
 def _read_env_value(*, env_file_path: str, key: str) -> str | None:
-    return _read_env_map(env_file_path=env_file_path).get(key)
+    return _runtime_env_map(env_file_path=env_file_path).get(key)
 
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
@@ -782,6 +802,22 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
             continue
         name, _, value = stripped.partition("=")
         env_map[name.strip()] = value.strip()
+    return env_map
+
+
+def _process_voice_env_map() -> dict[str, str]:
+    env_map: dict[str, str] = {}
+    for key in VOICE_ENV_KEYS:
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            env_map[key] = value
+    return env_map
+
+
+def _runtime_env_map(*, env_file_path: str | None = None) -> dict[str, str]:
+    env_map = _process_voice_env_map()
+    if env_file_path:
+        env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
     return env_map
 
 
@@ -809,7 +845,7 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
     surface = str(payload.get("surface") or "").strip().lower()
-    env_map = _read_env_map(env_file_path=env_file_path) if env_file_path else {}
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
     provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
     if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
         return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
@@ -1133,7 +1169,7 @@ def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
-        env_map = _read_env_map(env_file_path=env_file_path)
+        env_map = _runtime_env_map(env_file_path=env_file_path)
         configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
         if configured:
             return configured
@@ -1143,7 +1179,7 @@ def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
 def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | None:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
-        env_map = _read_env_map(env_file_path=env_file_path)
+        env_map = _runtime_env_map(env_file_path=env_file_path)
         configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
         if configured:
             return configured
@@ -1153,7 +1189,7 @@ def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | Non
 def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
-        env_map = _read_env_map(env_file_path=env_file_path)
+        env_map = _runtime_env_map(env_file_path=env_file_path)
         configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
         if configured in {"1", "true", "yes", "on"}:
             return True
@@ -1165,7 +1201,7 @@ def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
 def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
-        env_map = _read_env_map(env_file_path=env_file_path)
+        env_map = _runtime_env_map(env_file_path=env_file_path)
         configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
         if configured:
             try:

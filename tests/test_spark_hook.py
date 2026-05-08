@@ -159,6 +159,37 @@ def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
     assert "speak back with Kokoro" in result["result"]["reply_text"]
 
 
+def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voice_keys(tmp_path):
+    builder_env = tmp_path / ".env"
+    builder_env.write_text("SPARK_BUILDER_HOME=C:/fake/builder\n", encoding="utf-8")
+    model_path = tmp_path / "kokoro-v1.0.onnx"
+    voices_path = tmp_path / "voices-v1.0.bin"
+    model_path.write_bytes(b"model")
+    voices_path.write_bytes(b"voices")
+
+    with patch.dict(
+        "os.environ",
+        {
+            "VOICE_TTS_PROVIDER": "kokoro",
+            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
+            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
+        },
+        clear=False,
+    ), patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ), patch(
+        "voice_comms_chip.spark_hook._local_pyttsx3_available",
+        return_value=False,
+    ):
+        result = handle_voice_onboard_hook({"route": "local", "builder_env_file_path": str(builder_env)})
+
+    assert result["returncode"] == 0
+    assert result["metrics"]["local_ready"] == 1
+    assert result["result"]["snapshot"]["local_tts"]["provider"] == "kokoro"
+    assert "speak back with Kokoro" in result["result"]["reply_text"]
+
+
 def test_voice_onboard_uses_source_labeled_local_preference():
     result = handle_voice_onboard_hook(
         {
@@ -218,6 +249,31 @@ def test_voice_install_kokoro_skips_pip_when_already_installed():
     assert result["stdout"] == "already_installed"
     assert result["result"]["installed"] is True
     assert result["result"]["already_installed"] is True
+    run.assert_not_called()
+
+
+def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
+    model_path = tmp_path / "kokoro-v1.0.onnx"
+    voices_path = tmp_path / "voices-v1.0.bin"
+    model_path.write_bytes(b"model")
+    voices_path.write_bytes(b"voices")
+
+    with patch.dict(
+        "os.environ",
+        {
+            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
+            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
+        },
+        clear=False,
+    ), patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+    ) as run:
+        result = handle_voice_install_hook({"target": "kokoro"})
+
+    assert result["returncode"] == 0
+    assert result["result"]["kokoro_ready"] is True
+    assert "local voice model files" in result["result"]["reply_text"]
+    assert "local setup step" not in result["result"]["reply_text"]
     run.assert_not_called()
 
 
