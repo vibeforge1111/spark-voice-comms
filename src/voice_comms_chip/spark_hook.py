@@ -263,8 +263,9 @@ def _voice_onboarding_reply_text(
         if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
             voice_name = "Kokoro" if snapshot["local_tts"].get("provider") == LOCAL_KOKORO_TTS_PROVIDER else "the local system voice"
             lines = [
-                f"Good, local voice is ready. I can listen with faster-whisper and speak back with {voice_name} from this machine.",
-                next_step,
+                f"Nice, local voice is ready: faster-whisper for listening, {voice_name} for replies.",
+                "",
+                "Ask me for one short voice reply, then send a quick Telegram voice note.",
             ]
         elif snapshot["local_stt"]["ready"]:
             lines = [
@@ -324,10 +325,16 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
 def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> str:
     installed_line = "Kokoro is already installed for this Spark." if install_status == "already_installed" else "Done, Kokoro is installed for this Spark."
     if kokoro_ready:
+        ready_line = (
+            "Nice, Kokoro is already installed for this Spark. The local voice files are connected too."
+            if install_status == "already_installed"
+            else "Nice, Kokoro is installed for this Spark. The local voice files are connected too."
+        )
         return "\n".join(
             [
-                f"{installed_line} I can see the local voice model files too, so Spark can use Kokoro for private voice replies from this machine.",
-                "Try `/voice onboard local`, then ask for a short voice reply.",
+                ready_line,
+                "",
+                "You can test it with `/voice onboard local`.",
             ]
         )
     return "\n".join(
