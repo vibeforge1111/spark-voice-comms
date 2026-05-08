@@ -1276,7 +1276,6 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
     headers = [
         "Authorization: Bearer " + str(request["secret_value"]),
-        "OpenAI-Beta: realtime=v1",
     ]
     ws = websocket.create_connection(url, header=headers, timeout=timeout)
     audio_chunks: list[bytes] = []
