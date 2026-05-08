@@ -49,7 +49,15 @@ Spark should answer these like an onboarding guide, not like a diagnostic dump. 
 
 ## 3. Configure Speech-To-Text
 
-Add provider settings to the local Builder environment file or secret layer. Do not commit this file.
+For the free local path, install faster-whisper:
+
+```bash
+python -m pip install -e ".[local-stt]"
+```
+
+When `faster-whisper` is installed, Spark's default STT mode is `auto`: use local faster-whisper first, with no OpenAI transcription call. This is the preferred path for private, cost-sensitive Telegram voice notes.
+
+Hosted STT is still supported when you explicitly want it. Add provider settings to the local Builder environment file or secret layer. Do not commit this file.
 
 ```text
 OPENAI_API_KEY=<your OpenAI API key>
@@ -60,18 +68,12 @@ VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 
 Supported STT path today:
 
+- local faster-whisper first in default `auto` mode
 - OpenAI-compatible `/audio/transcriptions`
 - env-backed API key transport
 - deterministic fallback mode for tests
-- optional local faster-whisper fallback when installed
 
-For a free local STT path:
-
-```bash
-python -m pip install -e ".[local-stt]"
-```
-
-Local STT is best for private/offline testing and cost-sensitive setups. Hosted STT is usually simpler for production Telegram bots.
+Set `VOICE_TRANSCRIBE_PROVIDER=openai` only when hosted transcription is intentional.
 
 ## 4. Configure Text-To-Speech
 

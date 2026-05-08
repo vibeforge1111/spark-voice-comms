@@ -76,7 +76,7 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.sp
 
 ## 5. Paid Provider Setup
 
-Add this to the host Spark environment or supported secret layer. Do not paste real keys into Telegram chat.
+Local faster-whisper STT is preferred for transcription when installed, so Telegram voice notes do not require OpenAI transcription spend by default. Use the hosted STT settings below only when paid transcription is intentional. Do not paste real keys into Telegram chat.
 
 ```text
 OPENAI_API_KEY=<your OpenAI API key>

@@ -102,19 +102,23 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
     if status.get("local_ready"):
+        local_tts_ready = bool(status.get("local_tts_ready"))
         profile_name = str(profile_summary["profile_name"])
         tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
         lines = [
-            "Local voice is ready.",
+            "Local voice is ready." if local_tts_ready else "Local transcription is ready.",
             "",
-            "I can listen with faster-whisper and speak back with Kokoro from this machine.",
+            "I will listen with faster-whisper from this machine.",
         ]
+        speech_status = str(status.get("speech_reply_status") or "").strip()
+        if local_tts_ready and speech_status:
+            lines.extend(["", f"Speech replies are {speech_status}."])
         provider_note = str(status.get("provider_note") or "").strip()
         if provider_note:
             lines.extend(
                 [
                     "",
-                    "Your hosted/custom transcription provider still has not been verified, so I will use the local path for now.",
+                    provider_note,
                 ]
             )
         lines.extend(
@@ -122,7 +126,11 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 "",
                 f"Voice profile: {profile_name}, {tone_identity}.",
                 "",
-                "Next: send a short Telegram voice note, or ask me to say something with Kokoro.",
+                (
+                    "Next: send a short Telegram voice note, or ask me to say something with Kokoro."
+                    if local_tts_ready
+                    else "Next: send a short Telegram voice note to test local transcription."
+                ),
             ]
         )
     else:
@@ -608,6 +616,40 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
     fallback_mode = _resolve_fallback_mode(payload)
+    transcription_mode = _transcription_provider_mode(payload)
+    if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
+        try:
+            transcript_text = _transcribe_with_local_faster_whisper(
+                payload=payload,
+                audio_bytes=audio_bytes,
+                filename=filename,
+            )
+        except Exception as exc:
+            if fallback_mode == "deterministic":
+                return _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc))
+            raise RuntimeError(
+                "Local faster-whisper transcription failed before any hosted transcription call was made. "
+                "Fix local STT, or set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted transcription."
+            ) from exc
+        else:
+            return {
+                "returncode": 0,
+                "stdout": transcript_text,
+                "stderr": "",
+                "metrics": {
+                    "transcript_characters": len(transcript_text),
+                    "audio_bytes": len(audio_bytes),
+                    "local_first": 1,
+                },
+                "result": {
+                    "transcript_text": transcript_text,
+                    "provider_id": "local_faster_whisper",
+                    "model": _resolve_local_faster_whisper_model(payload),
+                    "mode": "local_faster_whisper",
+                },
+            }
+    if transcription_mode == "local":
+        raise ValueError("Local faster-whisper transcription is selected, but `faster_whisper` is not installed.")
     try:
         provider = _resolve_provider(payload)
         transcript_text = _transcribe_with_provider(
@@ -618,28 +660,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
         )
     except Exception as exc:
         if fallback_mode == "deterministic":
-            transcript_text = _build_deterministic_fallback_transcript(
-                audio_bytes=audio_bytes,
-                filename=filename,
-                reason=str(exc),
-            )
-            return {
-                "returncode": 0,
-                "stdout": transcript_text,
-                "stderr": "",
-                "metrics": {
-                    "transcript_characters": len(transcript_text),
-                    "audio_bytes": len(audio_bytes),
-                    "fallback_used": 1,
-                },
-                "result": {
-                    "transcript_text": transcript_text,
-                    "provider_id": "deterministic_fallback",
-                    "model": "deterministic_fallback",
-                    "mode": "deterministic_fallback",
-                    "fallback_reason": str(exc),
-                },
-            }
+            return _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc))
         if _local_faster_whisper_available():
             transcript_text = _transcribe_with_local_faster_whisper(
                 payload=payload,
@@ -689,10 +710,22 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
         except Exception:
             pass
+    transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
-    if local_stt_ready and local_tts_status["ready"]:
-        provider_note = ""
+    if transcription_mode == "local" and not local_stt_ready:
+        return {
+            "ready": False,
+            "local_ready": False,
+            "local_tts_ready": bool(local_tts_status["ready"]),
+            "speech_reply_status": str(local_tts_status["status"]),
+            "reason": "local faster-whisper transcription is selected, but `faster_whisper` is not installed",
+            "provider_id": "local_faster_whisper",
+            "provider_kind": "local",
+            "model": _resolve_local_faster_whisper_model(payload),
+        }
+    if local_stt_ready and transcription_mode in {"auto", "local"}:
+        provider_note = "Hosted transcription is configured but local faster-whisper will be used first."
         provider_id = None
         provider_kind = None
         try:
@@ -701,19 +734,22 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             provider_kind = provider["provider_kind"]
             if provider["provider_kind"] == "custom":
                 provider_note = (
-                    "custom provider transcription compatibility is not verified yet; "
-                    "local faster-whisper is ready for transcription."
+                    "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
                 )
         except Exception as exc:
-            provider_note = f"hosted transcription provider is not configured: {exc}"
+            provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
         return {
             "ready": True,
             "local_ready": True,
-            "reason": f"local transcription is ready via faster-whisper and speech replies are {local_tts_status['status']}",
+            "local_tts_ready": bool(local_tts_status["ready"]),
+            "speech_reply_status": str(local_tts_status["status"]),
+            "reason": f"local transcription is configured via faster-whisper using model {_resolve_local_faster_whisper_model(payload)}",
             "provider_note": provider_note,
-            "provider_id": provider_id,
-            "provider_kind": provider_kind,
-            "model": "local:faster-whisper",
+            "provider_id": "local_faster_whisper",
+            "provider_kind": "local",
+            "hosted_provider_id": provider_id,
+            "hosted_provider_kind": provider_kind,
+            "model": _resolve_local_faster_whisper_model(payload),
         }
     try:
         provider = _resolve_provider(payload)
@@ -896,6 +932,11 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     env_map = _runtime_env_map(env_file_path=env_file_path or None)
     provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
+    normalized_provider_id = provider_id.replace("_", "-")
+    if normalized_provider_id in {"auto", "default"}:
+        provider_id = ""
+    elif normalized_provider_id in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
+        return None
     base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
     secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()
     if provider_id or base_url or secret_env_ref:
@@ -973,6 +1014,48 @@ def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
             f"Unsupported fallback_mode '{mode}'. Supported fallback modes: {', '.join(sorted(SUPPORTED_FALLBACK_MODES))}."
         )
     return mode
+
+
+def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, reason: str) -> dict[str, Any]:
+    transcript_text = _build_deterministic_fallback_transcript(
+        audio_bytes=audio_bytes,
+        filename=filename,
+        reason=reason,
+    )
+    return {
+        "returncode": 0,
+        "stdout": transcript_text,
+        "stderr": "",
+        "metrics": {
+            "transcript_characters": len(transcript_text),
+            "audio_bytes": len(audio_bytes),
+            "fallback_used": 1,
+        },
+        "result": {
+            "transcript_text": transcript_text,
+            "provider_id": "deterministic_fallback",
+            "model": "deterministic_fallback",
+            "mode": "deterministic_fallback",
+            "fallback_reason": reason,
+        },
+    }
+
+
+def _transcription_provider_mode(payload: dict[str, Any]) -> str:
+    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    try:
+        env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    except Exception:
+        env_map = _process_voice_env_map()
+    provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
+    if not provider_id:
+        return "auto"
+    normalized = provider_id.replace("_", "-")
+    if normalized in {"auto", "default"}:
+        return "auto"
+    if normalized in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
+        return "local"
+    return "provider"
 
 
 def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) -> dict[str, Any]:

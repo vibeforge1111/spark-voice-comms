@@ -57,7 +57,8 @@ def _payload(tmp_path, **overrides):
 
 
 def test_voice_status_reports_ready_when_provider_is_usable(tmp_path):
-    result = handle_voice_status_hook(_payload(tmp_path))
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
+        result = handle_voice_status_hook(_payload(tmp_path))
     assert result["returncode"] == 0
     assert result["result"]["ready"] is True
     assert "Voice chip is ready." in result["result"]["reply_text"]
@@ -66,19 +67,20 @@ def test_voice_status_reports_ready_when_provider_is_usable(tmp_path):
 def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("CUSTOM_API_KEY=custom-test-key\n", encoding="utf-8")
-    result = handle_voice_status_hook(
-        {
-            "builder_env_file_path": str(env_file),
-            "provider": {
-                "provider_id": "custom",
-                "provider_kind": "custom",
-                "auth_method": "api_key_env",
-                "execution_transport": "direct_http",
-                "base_url": "https://api.example.com/v1",
-                "secret_env_ref": "CUSTOM_API_KEY",
-            },
-        }
-    )
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
+        result = handle_voice_status_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "provider": {
+                    "provider_id": "custom",
+                    "provider_kind": "custom",
+                    "auth_method": "api_key_env",
+                    "execution_transport": "direct_http",
+                    "base_url": "https://api.example.com/v1",
+                    "secret_env_ref": "CUSTOM_API_KEY",
+                },
+            }
+        )
     assert result["returncode"] == 0
     assert result["result"]["ready"] is False
     assert "custom provider transcription compatibility is not verified yet" in result["result"]["reason"]
@@ -125,9 +127,23 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
     assert result["result"]["ready"] is True
     assert result["result"]["local_ready"] is True
     assert "Local voice is ready." in result["result"]["reply_text"]
-    assert "hosted/custom transcription provider still has not been verified" in result["result"]["reply_text"]
+    assert "Custom provider transcription compatibility is not verified yet" in result["result"]["reply_text"]
     assert "ask me to say something with Kokoro" in result["result"]["reply_text"]
     assert "Voice chip is not ready yet" not in result["result"]["reply_text"]
+
+
+def test_voice_status_prefers_local_transcription_when_available_even_with_openai_key(tmp_path):
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True):
+        result = handle_voice_status_hook(_payload(tmp_path))
+
+    assert result["returncode"] == 0
+    assert result["result"]["ready"] is True
+    assert result["result"]["local_ready"] is True
+    assert result["result"]["provider_id"] == "local_faster_whisper"
+    assert result["result"]["model"] == "tiny"
+    assert "Local transcription is ready." in result["result"]["reply_text"]
+    assert "I will listen with faster-whisper from this machine." in result["result"]["reply_text"]
+    assert "transcription is configured via openai" not in result["result"]["reply_text"]
 
 
 def test_voice_status_prefers_dedicated_openai_transcription_env_over_custom_provider(tmp_path):
@@ -403,7 +419,10 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
         captured["body"] = request.data
         return _FakeBinaryHttpResponse(json.dumps({"text": "/voice plan"}).encode("utf-8"))
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
+        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        side_effect=fake_urlopen,
+    ):
         result = handle_voice_transcribe_hook(
             _payload(
                 tmp_path,
@@ -424,8 +443,69 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     assert b"fake-ogg-bytes" in captured["body"]
 
 
+def test_voice_transcribe_auto_uses_openai_when_local_is_unavailable(tmp_path):
+    captured = {}
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+    )
+    Path(payload["builder_env_file_path"]).write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TRANSCRIBE_PROVIDER=auto",
+                "VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY",
+                "VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, timeout: int = 30):
+        captured["url"] = request.full_url
+        return _FakeBinaryHttpResponse(json.dumps({"text": "Hosted auto fallback"}).encode("utf-8"))
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
+        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        side_effect=fake_urlopen,
+    ):
+        result = handle_voice_transcribe_hook(payload)
+
+    assert result["returncode"] == 0
+    assert result["result"]["mode"] == "provider"
+    assert result["result"]["transcript_text"] == "Hosted auto fallback"
+    assert captured["url"] == "https://api.openai.com/v1/audio/transcriptions"
+
+
+def test_voice_transcribe_prefers_local_faster_whisper_without_openai_call_when_available(tmp_path):
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._transcribe_with_local_faster_whisper",
+        return_value="Local first transcript",
+    ), patch(
+        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        side_effect=AssertionError("hosted transcription should not be called"),
+    ):
+        result = handle_voice_transcribe_hook(
+            _payload(
+                tmp_path,
+                audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+                filename="telegram-voice.ogg",
+                mime_type="audio/ogg",
+            )
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["mode"] == "local_faster_whisper"
+    assert result["result"]["provider_id"] == "local_faster_whisper"
+    assert result["result"]["transcript_text"] == "Local first transcript"
+    assert result["metrics"]["local_first"] == 1
+
+
 def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_path):
-    with patch(
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
         "voice_comms_chip.spark_hook.urllib.request.urlopen",
         side_effect=RuntimeError("simulated provider outage"),
     ):
@@ -446,6 +526,16 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
 
 
 def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fails(tmp_path):
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+    )
+    Path(payload["builder_env_file_path"]).write_text(
+        f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\nVOICE_TRANSCRIBE_PROVIDER=openai\n",
+        encoding="utf-8",
+    )
     with patch(
         "voice_comms_chip.spark_hook.urllib.request.urlopen",
         side_effect=RuntimeError("simulated provider outage"),
@@ -457,12 +547,7 @@ def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fai
         return_value="Local fallback transcript",
     ):
         result = handle_voice_transcribe_hook(
-            _payload(
-                tmp_path,
-                audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
-                filename="telegram-voice.ogg",
-                mime_type="audio/ogg",
-            )
+            payload
         )
 
     assert result["returncode"] == 0

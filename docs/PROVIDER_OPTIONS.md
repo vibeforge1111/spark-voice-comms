@@ -33,6 +33,12 @@ Useful when:
 - provider spend should be zero
 - degraded mode should still be testable
 
+Runtime selection:
+
+- default `VOICE_TRANSCRIBE_PROVIDER=auto` uses local faster-whisper first when it is installed
+- `VOICE_TRANSCRIBE_PROVIDER=local` requires local faster-whisper and will not call hosted STT
+- `VOICE_TRANSCRIBE_PROVIDER=openai` deliberately uses hosted OpenAI-compatible transcription, with local fallback available if installed
+
 Tradeoffs:
 
 - model download and CPU/GPU performance vary by machine

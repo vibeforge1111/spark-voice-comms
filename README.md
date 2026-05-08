@@ -61,7 +61,7 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.tr
 
 Keep provider keys in your local Builder environment file or supported Spark secret layer. Do not commit `.env` files.
 
-For STT:
+Hosted STT is still supported when you explicitly want it:
 
 ```text
 OPENAI_API_KEY=<your OpenAI API key>
@@ -76,7 +76,7 @@ Free/local STT:
 python -m pip install -e ".[local-stt]"
 ```
 
-That enables local faster-whisper fallback when it is installed and the host runtime allows local model execution.
+When `faster-whisper` is installed, the default `VOICE_TRANSCRIBE_PROVIDER=auto` path uses local transcription first, so Telegram voice notes do not require OpenAI transcription calls. Set `VOICE_TRANSCRIBE_PROVIDER=openai` only when you deliberately want hosted STT.
 
 For TTS:
 
