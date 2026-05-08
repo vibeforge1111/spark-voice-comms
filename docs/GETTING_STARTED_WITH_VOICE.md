@@ -38,14 +38,19 @@ If `voice.onboard` is available to your Spark Telegram agent, users can ask setu
 - `voice onboard paid`
 - `voice status`
 - `voice plan`
+- `voice map`
 
 Natural-language prompts should work too:
 
 - `Can you help me set up voice locally for Spark?`
 - `I want private local voice replies.`
 - `I want the highest-quality paid voice for my Spark agent.`
+- `Find me a natural geeky QA tester voice.`
+- `Make it warmer and a little faster.`
 
 Spark should answer these like an onboarding guide, not like a diagnostic dump. Keep env names, Python paths, and provider secrets out of Telegram unless the operator explicitly asks for local config details.
+
+For the current Builder, Telegram, character, memory, and provider boundary map, see [CURRENT_SPARK_INTEGRATION_MAP.md](CURRENT_SPARK_INTEGRATION_MAP.md).
 
 ## 3. Configure Speech-To-Text
 

@@ -25,6 +25,8 @@ This chip lets a Spark Builder runtime add voice without absorbing voice code in
 
 Voice is still an explicitly activated capability. Installing this chip does not grant a Spark agent microphone, Telegram delivery, provider credentials, or approval to speak. The host Spark runtime must attach the chip, provide local secrets, and decide when voice is allowed.
 
+Current Spark integration map: [docs/CURRENT_SPARK_INTEGRATION_MAP.md](docs/CURRENT_SPARK_INTEGRATION_MAP.md).
+
 ## Quick Start
 
 ```bash

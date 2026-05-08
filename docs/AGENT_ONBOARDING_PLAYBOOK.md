@@ -116,6 +116,21 @@ When Spark already knows the user's preference or runtime provider, personalize 
 Since this Spark is already leaning local/private, I would finish Kokoro first. That keeps voice replies on this machine and avoids putting provider keys into Telegram.
 ```
 
+For voice self-awareness questions, keep the current map simple:
+
+```text
+Builder handles my thinking, memory, and character. The voice chip handles listening and speaking. Telegram is where the voice messages come and go. My current TTS provider is a DM preference, and I only call voice ready after status and delivery have both been tested.
+```
+
+Useful Telegram checks:
+
+- `/voice map`
+- `/voice provider`
+- `/probe voice`
+- `find me a natural geeky QA tester voice`
+- `audition the voice`
+- `make it warmer`
+
 Avoid Telegram-facing replies like:
 
 ```text
