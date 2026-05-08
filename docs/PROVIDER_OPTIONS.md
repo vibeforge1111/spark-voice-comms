@@ -51,6 +51,7 @@ python -m pip install -e ".[local-kokoro]"
 Configure local paths in the Builder env file or secret/config layer:
 
 ```text
+VOICE_TTS_PROVIDER=kokoro
 VOICE_TTS_KOKORO_MODEL_PATH=C:\path\to\kokoro-v1.0.onnx
 VOICE_TTS_KOKORO_VOICES_PATH=C:\path\to\voices-v1.0.bin
 VOICE_TTS_KOKORO_VOICE=af_sarah

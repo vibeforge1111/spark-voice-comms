@@ -111,7 +111,7 @@ For better free/local voice quality, install Kokoro support:
 python -m pip install -e ".[local-kokoro]"
 ```
 
-Set `VOICE_TTS_KOKORO_MODEL_PATH` and `VOICE_TTS_KOKORO_VOICES_PATH` to local Kokoro model files, then call `voice.speak` with `tts.provider_id=kokoro`.
+Set `VOICE_TTS_PROVIDER=kokoro`, `VOICE_TTS_KOKORO_MODEL_PATH`, and `VOICE_TTS_KOKORO_VOICES_PATH` to local Kokoro model files, then call `voice.speak`. You can still override a single call with `tts.provider_id`.
 
 Local TTS is useful for zero-cost setup and desktop playback. Kokoro is the preferred private/free quality path when model assets are configured. Hosted TTS is still the simpler path for Telegram voice-note delivery.
 

@@ -31,6 +31,7 @@ DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64"
+ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
 ENV_TTS_MODEL_ID = "VOICE_TTS_ELEVENLABS_MODEL_ID"
 ENV_TTS_VOICE_ID = "VOICE_TTS_ELEVENLABS_VOICE_ID"
@@ -733,8 +734,8 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
     surface = str(payload.get("surface") or "").strip().lower()
-    provider_id = str(tts.get("provider_id") or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
     env_map = _read_env_map(env_file_path=env_file_path) if env_file_path else {}
+    provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
     if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
         return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in {LOCAL_TTS_PROVIDER, "local"}:

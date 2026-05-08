@@ -126,6 +126,9 @@ def test_voice_onboard_guides_local_free_path():
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
         "voice_comms_chip.spark_hook._local_pyttsx3_available",
         return_value=True,
+    ), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=False,
     ):
         result = handle_voice_onboard_hook({"route": "local"})
 
@@ -608,6 +611,55 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
     assert captured["voices_path"] == str(voices_path)
     assert captured["create"] == {"text": "Kokoro local voice.", "voice": "af_sarah", "speed": 1.1, "lang": "en-us"}
     assert captured["write"] == {"samples": [0.0, 0.1, -0.1], "sample_rate": 24000, "format": "WAV"}
+
+
+def test_voice_speak_uses_env_default_tts_provider_for_kokoro(tmp_path):
+    captured: dict[str, object] = {}
+    model_path = tmp_path / "kokoro-v1.0.int8.onnx"
+    voices_path = tmp_path / "voices-v1.0.bin"
+    model_path.write_bytes(b"fake-model")
+    voices_path.write_bytes(b"fake-voices")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "VOICE_TTS_PROVIDER=kokoro",
+                f"VOICE_TTS_KOKORO_MODEL_PATH={model_path}",
+                f"VOICE_TTS_KOKORO_VOICES_PATH={voices_path}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeKokoro:
+        def __init__(self, model_path_arg: str, voices_path_arg: str) -> None:
+            captured["model_path"] = model_path_arg
+            captured["voices_path"] = voices_path_arg
+
+        def create(self, text: str, *, voice: str, speed: float, lang: str):
+            captured["create"] = {"text": text, "voice": voice, "speed": speed, "lang": lang}
+            return [0.0], 24000
+
+    with patch.dict(
+        sys.modules,
+        {
+            "kokoro_onnx": SimpleNamespace(Kokoro=FakeKokoro),
+            "soundfile": SimpleNamespace(write=lambda buffer, samples, sample_rate, *, format: buffer.write(b"env-kokoro-wav")),
+        },
+    ):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "text": "Env Kokoro voice.",
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["provider_id"] == "kokoro"
+    assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"env-kokoro-wav"
+    assert captured["model_path"] == str(model_path)
+    assert captured["voices_path"] == str(voices_path)
 
 
 def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(tmp_path):
