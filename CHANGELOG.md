@@ -14,4 +14,5 @@ Initial public-ready Spark voice chip.
 - Added optional local faster-whisper fallback support.
 - Added Telegram-oriented Opus output selection for hosted TTS.
 - Added deployment runbook, provider options, and agent onboarding playbook.
+- Documented natural-language Telegram voice onboarding, provider switching, ElevenLabs audition/tuning, Kokoro local setup, GPT Realtime 2 hosted setup, scoped rollback, and live dashboard proof boundaries.
 - Added AGPL-3.0-only license.

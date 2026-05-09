@@ -9,7 +9,7 @@ Use this before making the repo public.
 - [ ] `python -m pytest -q` passes.
 - [ ] No `.env` files are tracked.
 - [ ] No recordings, generated audio, transcripts, or private runtime state are tracked.
-- [ ] No local absolute paths remain in public docs.
+- [ ] No private machine-specific absolute paths remain in public docs. Placeholder paths such as `C:\path\to\...` are allowed only when they clearly teach local setup.
 - [ ] No token-shaped fake keys remain in tests or docs.
 - [ ] Git history has been scanned for real provider keys, token-shaped examples, local absolute paths, and provider voice ids.
 - [ ] If history scan finds anything sensitive or private, publish from a fresh scrubbed repo or rewrite history before making the repo public.
@@ -24,6 +24,7 @@ Use this before making the repo public.
 - [ ] Add one short demo payload for `voice.speak` that uses fake credentials and mocked provider calls.
 - [ ] Add a release tag only after the host Builder contract is stable.
 - [ ] Keep Telegram, provider, and human identity tokens outside this repo.
+- [ ] Verify the host Builder route supports natural-language voice search, selection, audition, tuning, rollback, and scoped dashboard proof before calling the Telegram experience production-ready.
 
 ## Release Positioning
 

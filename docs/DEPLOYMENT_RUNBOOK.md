@@ -35,6 +35,7 @@ From Telegram, ask:
 
 ```text
 /voice onboard
+/voice provider
 /voice install kokoro
 /voice onboard local
 /voice onboard paid
@@ -46,7 +47,14 @@ Natural prompts should work too if the host Builder has the onboarding route:
 Can you help me set up voice?
 Can I use free local TTS?
 Can you help me set up voice using paid?
+Guide me through ElevenLabs voice setup.
+Find me a natural warm voice.
+Use voice Elise.
+Audition the voice.
+Make it warmer and a little faster.
 ```
+
+Provider changes, voice search, auditions, tuning, and rollback are owned by the host Builder route. The chip supplies the speech hooks and provider adapters; Builder owns conversation, memory, personality, scoped preferences, and Telegram composition.
 
 ## 4. Local/Free Smoke
 
@@ -115,17 +123,21 @@ In the Spark Telegram DM:
 
 ```text
 /voice
-/voice plan
+/voice provider
 /voice onboard local
-/voice speak Voice setup smoke test.
+/voice ask Give me one warm QA-style sentence with the current voice.
+/voice reply on
 ```
 
 Expected behavior:
 
 - `/voice` explains readiness or the missing provider step.
+- `/voice provider` shows the selected provider and safe next choices without revealing keys or full hosted voice IDs.
 - `/voice onboard local` gives a clear local/free setup path.
 - `/voice onboard paid` gives a provider setup path.
-- `/voice speak ...` should only deliver audio when the host runtime and connector approval allow it.
+- `/voice ask ...` should generate a Builder-authored answer first, then speak that answer.
+- `/voice reply on` should make the next normal reply eligible for audio delivery when the host runtime and connector approval allow it.
+- The visual dashboard, when available at `/voice-system`, should show masked provider/profile state and Telegram `sendVoice` proof without requiring `/voice dashboard` after every test.
 
 ## Rollback
 
