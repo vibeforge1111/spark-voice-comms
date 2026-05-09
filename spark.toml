@@ -1,0 +1,73 @@
+[module]
+name = "spark-voice-comms"
+version = "0.1.0"
+kind = "chip-pack"
+plane = "runtime"
+description = "Speech I/O chip for Spark voice transcription, provider onboarding, and spoken replies."
+homepage = "https://github.com/vibeforge1111/spark-voice-comms"
+license = "MIT"
+
+[runtime]
+kind = "python"
+version = ">=3.11"
+package_manager = "pip"
+
+[install.dev]
+commands = ["python -m pip install -e ."]
+
+[provides]
+capabilities = [
+  "spark.domain_chip",
+  "spark.voice",
+  "spark.voice.stt",
+  "spark.voice.tts",
+  "spark.voice.telegram_hooks",
+]
+
+[needs]
+modules = ["spark-intelligence-builder"]
+capabilities = ["spark.runtime"]
+secrets = ["voice.elevenlabs.api_key"]
+
+[claims]
+secrets = ["voice.elevenlabs.api_key"]
+ports = []
+routes = []
+
+[secrets.voice_elevenlabs_api_key]
+prompt = "Optional ElevenLabs API key for hosted Spark voice TTS"
+required = false
+storage = "keychain"
+env_var = "ELEVENLABS_API_KEY"
+
+[healthcheck]
+command = "python -c \"from voice_comms_chip.runtime_state import build_voice_runtime_state; build_voice_runtime_state(); print('spark-voice-comms importable')\""
+timeout_seconds = 20
+success_hint = "Spark Voice Comms hooks are importable."
+failure_hint = "Run `python -m pytest -q` in the spark-voice-comms module home for detail."
+
+[entrypoints]
+hook = "python -m voice_comms_chip.spark_hook"
+
+[config]
+format = "none"
+installer_owned = false
+
+[paths]
+home = "~/.spark/modules/spark-voice-comms"
+state = "~/.spark/state/spark-voice-comms"
+logs = "~/.spark/logs/spark-voice-comms"
+
+[profiles.telegram_starter]
+role = "builder-attached-voice-chip"
+owns = [
+  "spark.voice.stt",
+  "spark.voice.tts",
+  "spark.voice.telegram_hooks",
+]
+does_not_own = [
+  "telegram.ingress",
+  "telegram.bot_token",
+  "spark.runtime",
+  "spark.memory",
+]
