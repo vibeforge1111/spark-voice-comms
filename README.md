@@ -314,6 +314,7 @@ This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 - [Provider options](./docs/PROVIDER_OPTIONS.md)
 - [Provider compatibility](./docs/PROVIDER_COMPATIBILITY_2026-04-09.md)
 - [Voice hardening map](./docs/VOICE_HARDENING_MAP_2026-05-09.md)
+- [Voice continuation handoff](./docs/VOICE_CONTINUATION_HANDOFF_2026-05-09.md)
 - [Builder boundary](./docs/BUILDER_BOUNDARY_2026-04-09.md)
 - [Implementation plan](./docs/VOICE_COMMS_IMPLEMENTATION_PLAN_2026-04-09.md)
 - [Public release checklist](./docs/PUBLIC_RELEASE_CHECKLIST.md)
