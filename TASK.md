@@ -42,6 +42,18 @@ Make voice feel like a natural Spark surface: users can ask their Telegram agent
 - [ ] Confirm Telegram `/voice speak <text>` returns audio when voice replies are explicitly allowed.
 - [ ] Confirm voice note input transcribes, returns to the normal Builder conversation runtime, and does not bypass memory/personality policy.
 
+## Phase 2.5 - Runtime Hardening
+
+Detailed implementation map: [docs/VOICE_HARDENING_MAP_2026-05-09.md](docs/VOICE_HARDENING_MAP_2026-05-09.md)
+
+- [ ] Add a canonical `VoiceRuntimeState` so `/voice`, `/voice provider`, `/voice map`, `/probe voice`, and diagnostics do not reconstruct conflicting readiness claims.
+- [ ] Record Telegram `sendVoice` success/failure separately from TTS synthesis success.
+- [ ] Add latency segments for download, transcription, Builder answer generation, TTS, conversion, and Telegram delivery.
+- [ ] Enforce text/audio coherence: `/voice speak` reads exact text, `/voice ask` answers first then speaks that answer, and captions cannot silently diverge from audio.
+- [ ] Guard natural voice tuning phrases so they do not trigger Spawner/project-build routes.
+- [ ] Persist provider/voice calibration with masked or fingerprinted identity, audition history, and rollback.
+- [ ] Keep user-facing voice onboarding conversational while operator diagnostics carry raw setup detail only on request.
+
 ## Phase 3 - Character And Personality
 
 - [ ] Generate visible replies through Builder's active Spark personality and Spark Character contract.
