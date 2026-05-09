@@ -31,11 +31,26 @@ Use `/voice ask <question>` when Builder should answer first and then speak the 
 
 Use `/voice speak <text>` only when exact supplied text should be read aloud.
 
+## Multi-Agent Voice Preference Boundary
+
+Voice provider choice and voice tuning are host identity state. They should live in Builder or the host runtime, not inside this chip.
+
+For Telegram-facing Spark agents, the host should scope persistent TTS preferences by the most specific available identity:
+
+1. agent + Telegram profile + Telegram DM
+2. Telegram profile + Telegram DM
+3. legacy Telegram DM-only state, only for the default profile
+
+This prevents one agent's voice experiments from changing another agent's character voice. For example, a default DM ElevenLabs tuning should not override a named Parrot Cove profile unless the operator tunes Parrot Cove while that profile is active.
+
+This chip can accept the selected provider/profile through the `tts` hook payload, but it should not decide which user, agent, or Telegram profile owns that preference.
+
 ## Telegram Self-Awareness
 
 Spark should be able to answer:
 
 - what voice provider is active for this Telegram DM
+- which voice preference scope is active
 - whether voice replies are on or off
 - what the active ElevenLabs voice/profile is
 - whether `voice.status` currently reports STT/TTS ready
@@ -46,4 +61,3 @@ The Builder-side `/voice map`, `/voice provider`, `/voice status`, and `/probe v
 ## Security Boundary
 
 Never place API keys in Telegram messages, docs, examples, screenshots, or committed config. Use environment variable names and masked IDs only.
-

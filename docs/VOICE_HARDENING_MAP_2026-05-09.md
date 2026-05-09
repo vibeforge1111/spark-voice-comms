@@ -69,7 +69,7 @@ Use this table when deciding where a fix belongs. Most regressions came from the
 | Telegram `sendVoice`, file download, format conversion | `spark-telegram-bot` plus Builder bridge | `spark-voice-comms` hook code |
 | Character, tone, spoken style constraints | `spark-character` | provider readiness checks |
 | Long-running build/project missions | Spawner | voice tuning phrases |
-| Persistent user/DM voice preference | Builder runtime state | global voice profile files alone |
+| Persistent user/DM/agent voice preference | Builder runtime state scoped by agent, Telegram profile, and DM | global voice profile files alone |
 | Provider secrets | local env or Spark secret layer | Telegram messages, docs, logs, git |
 
 ## Fighting Elements To Remove Or Contain
@@ -83,6 +83,7 @@ These are the concrete conflict sources observed in live testing:
 - Text and audio being generated as separate answers. Builder should create one canonical answer, then derive a spoken variant and optional caption from it.
 - Synthesis success being treated as Telegram delivery success. Delivery is only proven after `sendVoice` returns a successful Telegram message result.
 - Provider readiness being inferred from the active chat LLM. GLM, MiniMax, Codex CLI, or any text provider should not imply STT/TTS readiness without a dedicated voice adapter.
+- Voice tuning state bleeding across agents or named profiles. Host runtimes should read/write provider and profile preferences by agent + Telegram profile + DM when possible, and avoid legacy DM-only fallback for non-default profiles.
 - User-facing diagnostics sounding like failures when setup is healthy. Normal replies should be conversational; raw paths, env names, and stack detail belong in explicit operator diagnostics.
 
 ## Runtime Claim Levels

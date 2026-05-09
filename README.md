@@ -164,7 +164,7 @@ Builder should:
 - detect Telegram or other channel audio messages
 - fetch channel media bytes
 - pass bounded payloads into chip hooks
-- keep personality, memory, approvals, and visible reply text
+- keep personality, memory, approvals, visible reply text, and per-agent voice preference scope
 
 This chip should:
 
@@ -173,6 +173,8 @@ This chip should:
 - synthesize speech
 - resolve voice profile and provider voice mapping
 - keep fallback behavior testable
+
+Voice provider and tuning preferences should be scoped by the host runtime, not this chip. For Telegram, prefer agent + Telegram profile + DM state, then Telegram profile + DM state, and use legacy DM-only state only for default-profile compatibility. This keeps one agent's ElevenLabs/Kokoro/OpenAI tuning from changing another agent's character voice.
 
 See [docs/BUILDER_BOUNDARY_2026-04-09.md](./docs/BUILDER_BOUNDARY_2026-04-09.md).
 
