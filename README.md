@@ -1,8 +1,56 @@
 # Spark Voice Comms
 
-Public voice communication hooks for Spark agents.
+Give a Spark agent a voice.
 
 License: AGPL-3.0-only. See [LICENSE](./LICENSE).
+
+`spark-voice-comms` is the public voice chip for Spark agents. It lets a Spark agent listen to voice notes and send spoken replies, especially through Telegram, while keeping the agent's personality, memory, permissions, and secrets in the main Spark runtime.
+
+In plain English: this repo is the speech layer. Spark still decides what to say. This chip helps Spark turn audio into text and text back into audio.
+
+## Start Here
+
+If you already have a Spark Telegram agent with this chip attached, you should not need to read code or paste keys into chat. Ask your agent:
+
+```text
+/voice
+/voice onboard
+/voice map
+Can you help me set up voice locally?
+Guide me through ElevenLabs voice setup.
+Find me a natural warm voice.
+Use voice Elise.
+Audition the voice.
+Make it warmer and a little faster.
+/voice ask Give me one short warm sentence with the current voice.
+```
+
+For the private/free local path, ask:
+
+```text
+/voice install local
+```
+
+That installs local listening (`faster-whisper`) and local speaking (`kokoro-onnx` + `soundfile`) into Spark's active Python runtime. If you only need one side:
+
+```text
+/voice install faster-whisper
+/voice install kokoro
+```
+
+## Choose A Voice Path
+
+Most users can choose one of these:
+
+| Path | Best For | What To Ask Spark |
+| --- | --- | --- |
+| Local/free | Privacy, no hosted TTS cost, offline-friendly setup | `help me set up local voice` or `/voice install local` |
+| ElevenLabs | Most polished, natural character voice | `guide me through ElevenLabs voice setup` |
+| GPT Realtime 2 | OpenAI-hosted expressive voice experiments | `use GPT Realtime 2 for voice` |
+
+MiniMax and Z.ai/GLM slots are documented as future adapter paths. Do not treat them as ready until a dedicated adapter and smoke test exist.
+
+## What This Repo Owns
 
 This chip lets a Spark Builder runtime add voice without absorbing voice code into the main agent. Builder keeps the conversation, identity, approvals, and channel transport. This repo owns only the speech I/O hooks:
 
@@ -26,6 +74,14 @@ This chip lets a Spark Builder runtime add voice without absorbing voice code in
 Voice is still an explicitly activated capability. Installing this chip does not grant a Spark agent microphone, Telegram delivery, provider credentials, or approval to speak. The host Spark runtime must attach the chip, provide local secrets, and decide when voice is allowed.
 
 This is the public voice lab. Do not use or document the older `spark-voice-engine` work as the current public voice system.
+
+## Safety Rules
+
+- Do not paste provider keys into Telegram.
+- Do not commit `.env` files, recordings, transcripts, generated audio, Telegram tokens, or hosted voice IDs.
+- Keep real provider keys in the local Builder environment file or Spark secret layer.
+- Treat `/voice`, `/voice map`, and `/voice-system` as redacted status surfaces, not places for secrets.
+- A successful TTS call is not the same as Telegram delivery. Real proof is a successful Telegram `sendVoice` event.
 
 ## Current Public Boundary
 
@@ -65,6 +121,25 @@ When the host Spark runtime wires this chip into Telegram, operators should be a
 The host owns those preferences and should scope them by agent, Telegram profile, and DM. This chip receives the resolved `tts` payload and speaks the Builder-authored answer.
 
 The visual voice dashboard belongs to the host runtime too. In the current Spark Telegram path, Builder writes redacted voice state and Spawner UI renders it at `/voice-system`; the page can read live Builder profile and delivery proof without requiring `/voice dashboard` after every voice reply.
+
+## For Spark Agents Reading This
+
+When a user asks you about voice, be helpful in normal language first.
+
+Good responses should:
+
+- tell the user which path fits them best: local/free, ElevenLabs, or GPT Realtime 2
+- mention what is already configured when runtime state proves it
+- guide the next step in Telegram, such as `/voice install local`, `audition the voice`, or `switch my voice to ElevenLabs`
+- keep secrets out of chat and point users to local config or Spark's secret layer
+- explain failures as setup steps, not as scary stack traces
+
+Avoid:
+
+- claiming a provider is ready just because the chat LLM uses that company
+- asking users to paste API keys into Telegram
+- mixing voice tuning requests with project-building or Spawner mission creation
+- saying audio was delivered unless Telegram `sendVoice` proof exists
 
 ## Quick Start
 
