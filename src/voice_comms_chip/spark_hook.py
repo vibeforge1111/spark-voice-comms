@@ -20,6 +20,7 @@ from uuid import uuid4
 from typing import Any
 
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
+from .runtime_state import state_from_speak, state_from_status
 
 DEFAULT_TRANSCRIPTION_MODEL = "whisper-1"
 SUPPORTED_PROVIDER_KINDS = {"openai", "custom"}
@@ -101,6 +102,7 @@ VOICE_ENV_KEYS = {
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
+    runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
         profile_name = str(profile_summary["profile_name"])
@@ -156,6 +158,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             **status,
             "voice_profile": profile_summary,
+            "runtime_state": runtime_state,
             "reply_text": "\n".join(lines),
         },
     }
@@ -587,6 +590,13 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+    runtime_state = state_from_speak(
+        request=request,
+        resolved_voice_id=resolved_voice_id,
+        audio_bytes=audio_bytes,
+        profile_summary=profile_summary,
+        payload=payload,
+    )
     return {
         "returncode": 0,
         "stdout": f"{request['provider_id']}:{resolved_voice_id}",
@@ -604,6 +614,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "voice_compatible": bool(request["voice_compatible"]),
             "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
             "voice_profile": profile_summary,
+            "runtime_state": runtime_state,
         },
     }
 
@@ -716,11 +727,16 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
+    active_tts_status = _active_tts_status(env_map=env_map, local_tts_status=local_tts_status)
     if transcription_mode in {"auto", "local"} and not local_stt_ready:
         return {
             "ready": False,
             "local_ready": False,
             "local_tts_ready": bool(local_tts_status["ready"]),
+            "local_tts_provider": str(local_tts_status["provider"]),
+            "tts_ready": bool(active_tts_status["ready"]),
+            "tts_provider_id": str(active_tts_status["provider"]),
+            "tts_status": str(active_tts_status["status"]),
             "speech_reply_status": str(local_tts_status["status"]),
             "reason": (
                 "local faster-whisper transcription is the default Telegram voice path, "
@@ -751,6 +767,10 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             "ready": True,
             "local_ready": True,
             "local_tts_ready": bool(local_tts_status["ready"]),
+            "local_tts_provider": str(local_tts_status["provider"]),
+            "tts_ready": bool(active_tts_status["ready"]),
+            "tts_provider_id": str(active_tts_status["provider"]),
+            "tts_status": str(active_tts_status["status"]),
             "speech_reply_status": str(local_tts_status["status"]),
             "reason": f"local transcription is configured via faster-whisper using model {_resolve_local_faster_whisper_model(payload)}",
             "provider_note": provider_note,
@@ -766,6 +786,11 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "ready": False,
             "local_ready": False,
+            "local_tts_ready": bool(local_tts_status["ready"]),
+            "local_tts_provider": str(local_tts_status["provider"]),
+            "tts_ready": bool(active_tts_status["ready"]),
+            "tts_provider_id": str(active_tts_status["provider"]),
+            "tts_status": str(active_tts_status["status"]),
             "reason": str(exc),
             "provider_id": None,
             "provider_kind": None,
@@ -775,6 +800,11 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "ready": False,
             "local_ready": False,
+            "local_tts_ready": bool(local_tts_status["ready"]),
+            "local_tts_provider": str(local_tts_status["provider"]),
+            "tts_ready": bool(active_tts_status["ready"]),
+            "tts_provider_id": str(active_tts_status["provider"]),
+            "tts_status": str(active_tts_status["status"]),
             "reason": (
                 "custom provider transcription compatibility is not verified yet. "
                 "This chip expects an OpenAI-compatible `/audio/transcriptions` endpoint."
@@ -786,6 +816,11 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "ready": True,
         "local_ready": False,
+        "local_tts_ready": bool(local_tts_status["ready"]),
+        "local_tts_provider": str(local_tts_status["provider"]),
+        "tts_ready": bool(active_tts_status["ready"]),
+        "tts_provider_id": str(active_tts_status["provider"]),
+        "tts_status": str(active_tts_status["status"]),
         "reason": (
             f"transcription is configured via {provider['provider_id']} "
             f"using model {DEFAULT_TRANSCRIPTION_MODEL}"
@@ -889,6 +924,18 @@ def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
         "provider": "none",
         "status": f"add ElevenLabs voice settings, or set {ENV_TTS_PROVIDER}=openai-realtime with an OpenAI key for GPT Realtime 2",
     }
+
+
+def _active_tts_status(*, env_map: dict[str, str], local_tts_status: dict[str, Any]) -> dict[str, Any]:
+    selected_provider = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower()
+    paid_tts_status = _paid_tts_status(env_map=env_map)
+    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "local"}:
+        return local_tts_status
+    if selected_provider in {"elevenlabs", *OPENAI_REALTIME_PROVIDER_ALIASES}:
+        return paid_tts_status
+    if local_tts_status.get("ready"):
+        return local_tts_status
+    return paid_tts_status
 
 
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:

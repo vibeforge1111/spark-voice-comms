@@ -184,6 +184,9 @@ def test_voice_status_prefers_dedicated_openai_transcription_env_over_custom_pro
     assert result["returncode"] == 0
     assert result["result"]["ready"] is True
     assert result["result"]["provider_id"] == "openai"
+    assert result["result"]["runtime_state"]["schema_version"] == "spark.voice_runtime_state.v1"
+    assert result["result"]["runtime_state"]["stt"]["provider_id"] == "openai"
+    assert result["result"]["runtime_state"]["claim_levels"]["delivery_ready"] is False
 
 
 def test_voice_plan_returns_modular_steps():
