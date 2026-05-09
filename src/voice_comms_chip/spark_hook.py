@@ -438,6 +438,7 @@ def _voice_onboarding_reply_text(
                 f"Nice, local voice is ready: faster-whisper for listening, {voice_name} for replies.",
                 "",
                 "Ask me for one short voice reply, then send a quick Telegram voice note.",
+                "After that, run `/voice self-test` to confirm the proof trail.",
             ]
         elif snapshot["local_stt"]["ready"]:
             lines = [
@@ -474,7 +475,7 @@ def _voice_onboarding_reply_text(
         return "\n".join(line for line in lines if line is not None)
     lines = [
         "I can help set up voice in the direction that fits this Spark best.",
-        "If you care most about privacy and zero spend, I would start local with faster-whisper and Kokoro. If you care most about the most natural voice, I would use a paid TTS provider after transcription is verified.",
+        "Choose local/private for faster-whisper plus Kokoro, or hosted/premium for ElevenLabs after listening is verified.",
         context_line,
         "",
         next_step,
@@ -701,13 +702,13 @@ def _guided_voice_recommendation(
 def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
     if recommended_path == "local_free":
         if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-            return "Next, ask for one short voice reply, then send a quick Telegram voice note."
-        return "Next: install the missing local voice package, then rerun `/voice onboard local`."
+            return "Next: ask for one short voice reply, send a quick Telegram voice note, then run `/voice self-test`."
+        return "Next: run `/voice install local`, then rerun `/voice onboard local`."
     if recommended_path == "paid_provider":
         if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
-            return "Next: verify `/voice status`, then ask for one short paid voice reply."
-        return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram."
-    return "Next: tell me whether you care more about local/private or highest-quality voice, and I will recommend the setup."
+            return "Next: verify `/voice status`, ask for one short paid voice reply, then run `/voice self-test`."
+        return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram. Then run `/voice self-test` after one voice note."
+    return "Next: reply `local/private` or `highest-quality voice`; I will recommend the setup."
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
