@@ -58,7 +58,24 @@ Spark should be able to answer:
 
 The Builder-side `/voice map`, `/voice provider`, `/voice status`, and `/probe voice` commands are the runtime-facing surfaces for those answers.
 
-`/voice dashboard` is the visual layer for the same truth. Builder should write a redacted runtime snapshot for Spawner UI, and Spawner UI should render it at `/voice-system`. That dashboard can show the active provider, masked voice ID, preference scope, runtime path, delivery proof, and ownership boundaries, but it must not receive provider keys, Telegram tokens, raw env values, or private account identifiers.
+`/voice dashboard` is the visual layer for the same truth. Builder can write a redacted runtime snapshot for Spawner UI, and Spawner UI should render it at `/voice-system`. The dashboard should also read live Builder runtime state for the active provider/profile and last Telegram `sendVoice` proof, so users do not need to run `/voice dashboard` after every voice reply just to refresh delivery status.
+
+That dashboard can show the active provider, masked voice ID, preference scope, runtime path, delivery proof, and ownership boundaries, but it must not receive provider keys, Telegram tokens, raw env values, or private account identifiers.
+
+## Natural Voice Tuning
+
+Telegram should let users tune voice in plain language without falling into project-build or mission-control routes.
+
+Supported host-runtime examples:
+
+- `find me a natural geeky QA tester voice`
+- `use voice Elise`
+- `audition the voice`
+- `make it warmer`
+- `a little faster`
+- `go back to the previous voice`
+
+Rollback is host-scoped. It should restore the previous voice profile/provider for the current agent + Telegram profile + DM only, not for every Spark agent on the machine.
 
 ## Security Boundary
 

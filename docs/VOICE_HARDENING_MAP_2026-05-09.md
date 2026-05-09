@@ -105,6 +105,13 @@ Today, voice truth is spread across `/voice`, `/voice provider`, `/probe voice`,
 
 Target: create one canonical voice runtime state object that every surface can render from.
 
+Current progress:
+
+- Builder emits `spark.voice_runtime_state.v1` from `voice.speak` and Telegram delivery paths.
+- Telegram delivery proof is recorded back into Builder runtime state after `sendVoice`.
+- `/voice` now appends the same scoped Builder profile state and last delivery proof used by provider/dashboard surfaces.
+- Spawner UI `/voice-system` reads live Builder profile and delivery proof directly, so `/voice dashboard` is no longer required after every voice reply just to refresh status.
+
 Suggested shape:
 
 ```json
@@ -288,9 +295,9 @@ Do not report MiniMax or Z.ai/GLM voice as ready just because their chat provide
 
 ### Phase A - State Unification
 
-- Add `VoiceRuntimeState` builder-side contract.
-- Normalize `voice.status`, per-DM provider state, env-derived profile, and delivery evidence into that contract.
-- Render `/voice`, `/voice provider`, `/voice map`, and `/probe voice` from it.
+- [x] Add `VoiceRuntimeState` builder-side contract.
+- [x] Normalize `voice.status`, per-DM provider state, env-derived profile, and delivery evidence into that contract for the Telegram voice path.
+- [x] Render `/voice`, `/voice provider`, `/voice map`, and `/voice-system` from shared Builder state where current code supports it.
 - Add regression tests for each renderer using the same state fixture.
 - Make legacy chip aliases collapse into the canonical `spark-voice-comms` identity before rendering.
 
@@ -302,9 +309,9 @@ Exit gate:
 
 ### Phase B - Delivery Trace
 
-- Capture successful Telegram `sendVoice` evidence.
-- Capture failed Telegram delivery with safe failure reason.
-- Record delivery evidence into Builder observability or route evidence.
+- [x] Capture successful Telegram `sendVoice` evidence.
+- [x] Capture failed Telegram delivery with safe failure reason.
+- [x] Record delivery evidence into Builder runtime state.
 - Include delivery status in `/probe voice`.
 
 Exit gate:
@@ -341,7 +348,7 @@ Exit gate:
 ### Phase E - Voice Profiles
 
 - Store named provider profiles with fingerprints.
-- Add rollback to previous profile.
+- [x] Add scoped rollback to previous profile/provider for Telegram voice tuning.
 - Add audition history.
 - Keep per-DM overrides separate from global defaults.
 

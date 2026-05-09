@@ -32,6 +32,10 @@ Users can ask:
 - `Can I use free local TTS?`
 - `What paid voice provider should I use?`
 - `Is voice ready right now?`
+- `Find me a natural geeky QA tester voice`
+- `Use voice Elise`
+- `Make it warmer and more geeky`
+- `Go back to the previous voice`
 
 ## Local/Free Path
 
@@ -126,10 +130,12 @@ Useful Telegram checks:
 
 - `/voice map`
 - `/voice provider`
+- `/voice dashboard`
 - `/probe voice`
 - `find me a natural geeky QA tester voice`
 - `audition the voice`
 - `make it warmer`
+- `go back to the previous voice`
 
 Avoid Telegram-facing replies like:
 
@@ -147,3 +153,5 @@ Keep those details in local operator docs, structured hook results, or redacted 
 - Do not claim voice is active until `voice.status` and the host runtime capability state agree.
 - Do not store recordings, generated audio, transcripts, or provider credentials in this repo.
 - If Telegram voice delivery fails, report the channel-format issue clearly instead of retrying blindly.
+- If a provider rejects local credentials, explain the local config step in plain language. Do not echo raw provider JSON such as `invalid_api_key` into Telegram.
+- If a voice tuning goes wrong, offer scoped rollback: `go back to the previous voice`.
