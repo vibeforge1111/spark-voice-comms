@@ -1,6 +1,6 @@
 # Contributing
 
-License: AGPL-3.0-only.
+License: MIT.
 
 Thanks for helping improve Spark Voice Comms.
 
@@ -32,7 +32,7 @@ python -m pip install -e ".[local]"
 - [ ] `python -m pytest -q` passes.
 - [ ] `python -m pip install -e ".[dev]"` works.
 - [ ] No `.env`, audio, transcript, recording, or generated voice artifact is committed.
-- [ ] Docs mention AGPL-3.0-only when adding a new public-facing document.
+- [ ] Docs mention MIT when adding a new public-facing document.
 - [ ] New provider behavior has a safe failure mode and does not print secret values.
 
 ## Release Notes

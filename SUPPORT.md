@@ -1,6 +1,6 @@
 # Support
 
-License: AGPL-3.0-only.
+License: MIT.
 
 ## Getting Help
 

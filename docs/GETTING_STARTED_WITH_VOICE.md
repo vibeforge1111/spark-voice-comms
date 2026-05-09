@@ -1,6 +1,6 @@
 # Getting Started With Voice
 
-License: AGPL-3.0-only.
+License: MIT.
 
 This guide is for Spark operators who want to bring voice to their own Spark agents without moving voice logic into Builder.
 

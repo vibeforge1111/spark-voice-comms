@@ -2,7 +2,7 @@
 
 Date: April 9, 2026
 
-License: AGPL-3.0-only.
+License: MIT.
 
 ## Goal
 
@@ -40,7 +40,7 @@ Current live constraints:
 - Telegram is still a turn-based voice surface, not a streaming one
 
 Important implementation note:
-- for Telegram, the correct TTS contract is not just “return some audio”
+- for Telegram, the correct TTS contract is not just â€œreturn some audioâ€
 - the chip should return Telegram-friendly Opus voice-note media
 - Builder should then deliver that media as a Telegram voice note
 - this was a real playback bug boundary, not a cosmetic preference

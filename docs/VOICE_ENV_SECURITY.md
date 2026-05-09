@@ -1,6 +1,6 @@
 # Voice Environment Security
 
-License: AGPL-3.0-only.
+License: MIT.
 
 Use this page when helping users configure voice provider credentials.
 

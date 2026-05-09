@@ -1,6 +1,6 @@
 # Public Release Checklist
 
-License: AGPL-3.0-only.
+License: MIT.
 
 Use this before making the repo public.
 
@@ -14,7 +14,7 @@ Use this before making the repo public.
 - [ ] Git history has been scanned for real provider keys, token-shaped examples, local absolute paths, and provider voice ids.
 - [ ] If history scan finds anything sensitive or private, publish from a fresh scrubbed repo or rewrite history before making the repo public.
 - [ ] The public README says voice activation depends on the host Spark runtime.
-- [x] The repo has an intentional license decision: AGPL-3.0-only.
+- [x] The repo has an intentional license decision: MIT.
 - [ ] GitHub Actions test workflow is green on the first public branch.
 - [ ] GitHub secret scanning and push protection are enabled once the repo is public.
 

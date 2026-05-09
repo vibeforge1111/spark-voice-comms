@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spark-voice-comms"
-version = "0.1.0"
+version = "0.1.1"
 description = "Modular voice communications hooks for Spark agents"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "AGPL-3.0-only"
+license = "MIT"
 keywords = ["spark", "voice", "speech-to-text", "text-to-speech", "telegram"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
 ]
 
 [project.optional-dependencies]

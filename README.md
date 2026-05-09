@@ -2,7 +2,7 @@
 
 Give a Spark agent a voice.
 
-License: AGPL-3.0-only. See [LICENSE](./LICENSE).
+License: MIT. See [LICENSE](./LICENSE).
 
 `spark-voice-comms` is the public voice chip for Spark agents. It lets a Spark agent listen to voice notes and send spoken replies, especially through Telegram, while keeping the agent's personality, memory, permissions, and secrets in the main Spark runtime.
 
@@ -304,7 +304,7 @@ Important: before making an existing private repository public, scan the full gi
 
 ## License
 
-This repo is licensed under the GNU Affero General Public License v3.0 only. See [LICENSE](./LICENSE).
+This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 
 ## Docs
 

@@ -1,6 +1,6 @@
 # Voice Hardening Map
 
-License: AGPL-3.0-only.
+License: MIT.
 
 Status: proposed implementation map
 

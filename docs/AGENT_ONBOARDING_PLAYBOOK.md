@@ -1,6 +1,6 @@
 # Agent Onboarding Playbook
 
-License: AGPL-3.0-only.
+License: MIT.
 
 This playbook helps a Spark Telegram agent guide users through voice setup without exposing secrets or pretending voice is active before it is approved.
 

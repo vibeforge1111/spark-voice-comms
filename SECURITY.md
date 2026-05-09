@@ -4,7 +4,7 @@
 
 This repo is pre-1.0. Security fixes target the current `main` branch unless a release branch is published later.
 
-License: AGPL-3.0-only. Security reports and fixes should preserve the repository license.
+License: MIT. Security reports and fixes should preserve the repository license.
 
 ## Reporting A Vulnerability
 
@@ -36,5 +36,5 @@ Before making a fork public:
 - remove local absolute paths
 - remove recordings, generated audio, transcripts, and private runtime state
 - publish from a fresh scrubbed repository or rewrite history if old commits contain private paths, token-shaped examples, or provider voice ids
-- confirm the AGPL-3.0-only license file and package metadata are present
+- confirm the MIT license file and package metadata are present
 - enable GitHub secret scanning and push protection for the public repository

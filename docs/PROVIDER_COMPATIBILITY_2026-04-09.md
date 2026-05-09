@@ -2,7 +2,7 @@
 
 Date: April 9, 2026
 
-License: AGPL-3.0-only.
+License: MIT.
 
 ## Purpose
 

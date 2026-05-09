@@ -1,6 +1,6 @@
 # Voice Chip x Builder Boundary
 
-License: AGPL-3.0-only.
+License: MIT.
 
 This repo owns speech transport and rendering, not the live conversational personality.
 

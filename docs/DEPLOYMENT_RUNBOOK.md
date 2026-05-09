@@ -1,6 +1,6 @@
 # Deployment Runbook
 
-License: AGPL-3.0-only.
+License: MIT.
 
 This runbook is for Spark operators bringing `spark-voice-comms` to a Telegram-facing Spark agent.
 

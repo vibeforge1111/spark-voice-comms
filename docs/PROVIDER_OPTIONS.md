@@ -1,6 +1,6 @@
 # Provider Options
 
-License: AGPL-3.0-only.
+License: MIT.
 
 Use this page to help users choose a voice setup.
 

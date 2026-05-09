@@ -1,6 +1,11 @@
 # Changelog
 
-License: AGPL-3.0-only.
+License: MIT.
+
+## 0.1.1 - 2026-05-09
+
+- Relicensed the public repo from AGPL-3.0-only to MIT.
+- Updated package metadata and public docs to match the MIT license.
 
 ## 0.1.0 - 2026-05-09
 
@@ -16,4 +21,4 @@ Initial public-ready Spark voice chip.
 - Added Telegram-oriented Opus output selection for hosted TTS.
 - Added deployment runbook, provider options, and agent onboarding playbook.
 - Documented natural-language Telegram voice onboarding, provider switching, ElevenLabs audition/tuning, Kokoro local setup, GPT Realtime 2 hosted setup, scoped rollback, and live dashboard proof boundaries.
-- Added AGPL-3.0-only license.
+- Added initial public license.
