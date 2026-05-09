@@ -50,6 +50,22 @@ The default Spark starter installer does not install every public lab automatica
 
 Current Spark integration map: [docs/CURRENT_SPARK_INTEGRATION_MAP.md](docs/CURRENT_SPARK_INTEGRATION_MAP.md).
 
+## Telegram Experience
+
+When the host Spark runtime wires this chip into Telegram, operators should be able to use natural language instead of managing provider details by hand:
+
+- `guide me through ElevenLabs voice setup`
+- `find me a natural geeky QA tester voice`
+- `use voice Elise`
+- `audition the voice`
+- `make it warmer and more geeky`
+- `go back to the previous voice`
+- `/voice ask Give me one warm QA-style sentence with the current voice.`
+
+The host owns those preferences and should scope them by agent, Telegram profile, and DM. This chip receives the resolved `tts` payload and speaks the Builder-authored answer.
+
+The visual voice dashboard belongs to the host runtime too. In the current Spark Telegram path, Builder writes redacted voice state and Spawner UI renders it at `/voice-system`; the page can read live Builder profile and delivery proof without requiring `/voice dashboard` after every voice reply.
+
 ## Quick Start
 
 ```bash

@@ -58,9 +58,13 @@ When a user asks for voice setup, Spark should:
 - treat MiniMax and Z.ai as explicit future adapters, not generic OpenAI-compatible guesses
 - explain that Codex CLI can run missions and coding agents, but is not a voice STT/TTS provider for this chip
 - keep all secret handling outside Telegram
+- explain provider failures in local-config language, not raw provider JSON
+- recommend scoped rollback when a tuning change feels wrong: `go back to the previous voice`
 
 ## Public Repo Hygiene
 
 The repo should include `.env.example` but never a real `.env` file.
 
 Before release, run a secret scan over docs, source, tests, logs, and generated configs. The scan should look for provider key shapes, local absolute paths, Telegram ids, private usernames, and voice ids copied from a real account.
+
+The visual dashboard must follow the same rule. It can show provider labels, masked voice IDs, readiness, and Telegram delivery proof, but it must not include provider keys, Telegram tokens, raw env values, local private paths, recordings, transcripts, or unmasked hosted voice IDs.

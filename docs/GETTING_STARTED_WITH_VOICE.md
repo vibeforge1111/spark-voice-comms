@@ -46,7 +46,10 @@ Natural-language prompts should work too:
 - `I want private local voice replies.`
 - `I want the highest-quality paid voice for my Spark agent.`
 - `Find me a natural geeky QA tester voice.`
+- `Use voice Elise.`
+- `Audition the voice.`
 - `Make it warmer and a little faster.`
+- `Go back to the previous voice.`
 
 Spark should answer these like an onboarding guide, not like a diagnostic dump. Keep env names, Python paths, and provider secrets out of Telegram unless the operator explicitly asks for local config details.
 
@@ -172,6 +175,14 @@ For Telegram or another channel, Builder should:
 
 This chip does not own Telegram tokens, user identity, memory, or approval state.
 
+For Spark Telegram, the host should also expose:
+
+- `/voice provider` to show the selected provider, voice, and preference scope
+- `/voice map` to explain the Builder, Telegram, memory, character, and `spark-voice-comms` boundaries
+- `/voice-system` as the visual dashboard for active provider/profile, masked voice ID, runtime path, and last Telegram delivery proof
+
+`/voice dashboard` can refresh the broader redacted snapshot, but the dashboard should read live Builder runtime proof so users do not need to rerun it after every voice reply.
+
 ## 7. Activation Checklist
 
 Before enabling voice for real users:
@@ -179,8 +190,11 @@ Before enabling voice for real users:
 - `voice.status` reports ready for the intended provider
 - a real STT request succeeds
 - a real TTS request succeeds
+- Telegram `sendVoice` delivery has been proven separately from synthesis
+- text captions and spoken audio come from the same Builder-authored answer
 - provider failures return bounded errors
 - voice reply mode is explicit and reversible
+- voice tuning has scoped rollback, such as `go back to the previous voice`
 - no provider key, recording, transcript, or generated audio is committed
 - the operator has approved the connector boundary
 
@@ -191,6 +205,7 @@ Before enabling voice for real users:
 | `voice.status` says no env file was provided | Builder did not pass its local env path | Configure Builder's supported provider secret layer |
 | `voice.transcribe` says provider compatibility is unverified | Active provider is not OpenAI-compatible | Use OpenAI STT or configure an OpenAI-compatible endpoint |
 | `voice.speak` asks for a voice id | No `tts.voice_id` or `VOICE_TTS_ELEVENLABS_VOICE_ID` was supplied | Add a local ElevenLabs voice id |
+| ElevenLabs says the API key is invalid | The local key is missing, expired, or from the wrong account | Update `ELEVENLABS_API_KEY` in local config; do not paste it into Telegram |
 | Local TTS says `pyttsx3` is missing | The optional local TTS package is not installed | Run `python -m pip install -e ".[local-tts]"` |
 | Kokoro TTS asks for model assets | The optional package is installed but model paths are missing | Set `VOICE_TTS_KOKORO_MODEL_PATH` and `VOICE_TTS_KOKORO_VOICES_PATH` locally |
 | Telegram receives audio that does not play as a voice note | Wrong output format for Telegram | Use `surface=telegram` so the hook selects Opus output |

@@ -158,6 +158,13 @@ Tradeoffs:
 - provider account setup
 - users must keep credentials out of Telegram chat and git
 
+Telegram host behavior:
+
+- users can search and choose voices in natural language when the host runtime exposes the ElevenLabs voice list
+- tuning phrases like `make it warmer`, `less polished`, or `a little faster` should update the scoped host profile, not this repo
+- rollback should be scoped to the current agent, Telegram profile, and DM: `go back to the previous voice`
+- invalid-key or quota failures should be explained as local account/config issues, not pasted as raw provider JSON
+
 ### TTS: OpenAI GPT Realtime 2
 
 GPT Realtime 2 is a hosted OpenAI voice model for realtime speech interactions. In this chip, it is exposed as a server-side `voice.speak` provider that opens a Realtime WebSocket, asks for audio output, and returns WAV audio for the channel adapter to deliver or convert.
