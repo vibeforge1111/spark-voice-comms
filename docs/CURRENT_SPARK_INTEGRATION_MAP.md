@@ -58,6 +58,8 @@ Spark should be able to answer:
 
 The Builder-side `/voice map`, `/voice provider`, `/voice status`, and `/probe voice` commands are the runtime-facing surfaces for those answers.
 
+`/voice dashboard` is the visual layer for the same truth. Builder should write a redacted runtime snapshot for Spawner UI, and Spawner UI should render it at `/voice-system`. That dashboard can show the active provider, masked voice ID, preference scope, runtime path, delivery proof, and ownership boundaries, but it must not receive provider keys, Telegram tokens, raw env values, or private account identifiers.
+
 ## Security Boundary
 
 Never place API keys in Telegram messages, docs, examples, screenshots, or committed config. Use environment variable names and masked IDs only.
