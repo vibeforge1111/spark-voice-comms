@@ -35,6 +35,8 @@ If `voice.onboard` is available to your Spark Telegram agent, users can ask setu
 
 - `voice onboard local`
 - `voice install kokoro`
+- `voice install faster-whisper`
+- `voice install local`
 - `voice onboard paid`
 - `voice status`
 - `voice plan`
@@ -57,7 +59,13 @@ For the current Builder, Telegram, character, memory, and provider boundary map,
 
 ## 3. Configure Speech-To-Text
 
-For the free local path, install faster-whisper:
+For the free local path, install the full local stack from Telegram:
+
+```text
+/voice install local
+```
+
+That uses Spark's active Python runtime, which matters when the system Python and the Telegram runtime are different. If you are setting up by shell instead, install faster-whisper:
 
 ```bash
 python -m pip install -e ".[local-stt]"

@@ -352,6 +352,58 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     run.assert_not_called()
 
 
+def test_voice_install_faster_whisper_runs_local_pip_when_missing():
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, capture_output: bool, text: bool, timeout: int, check: bool):
+        calls.append(command)
+        assert capture_output is True
+        assert text is True
+        assert timeout == 300
+        assert check is False
+        return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", side_effect=[False, True]), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+        side_effect=fake_run,
+    ):
+        result = handle_voice_install_hook({"target": "faster-whisper"})
+
+    assert result["returncode"] == 0
+    assert result["result"]["installed"] is True
+    assert result["result"]["stt_ready"] is True
+    assert calls
+    assert calls[0][1:4] == ["-m", "pip", "install"]
+    assert "faster-whisper>=1.0" in calls[0]
+    assert "send one short Telegram voice note" in result["result"]["reply_text"]
+
+
+def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
+    calls: list[list[str]] = []
+
+    def fake_run(command, *, capture_output: bool, text: bool, timeout: int, check: bool):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", side_effect=[False, True]), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        side_effect=[False, True, True],
+    ), patch("voice_comms_chip.spark_hook._local_kokoro_ready", return_value=False), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+        side_effect=fake_run,
+    ):
+        result = handle_voice_install_hook({"target": "local"})
+
+    assert result["returncode"] == 0
+    assert result["result"]["installed"] is True
+    assert result["result"]["stt_ready"] is True
+    assert result["result"]["kokoro_installed"] is True
+    assert len(calls) == 2
+    assert "faster-whisper>=1.0" in calls[0]
+    assert "kokoro-onnx>=0.5.0" in calls[1]
+    assert "`/voice onboard local`" in result["result"]["reply_text"]
+
+
 def test_voice_onboard_reports_paid_provider_readiness(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(

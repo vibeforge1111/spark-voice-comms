@@ -85,6 +85,14 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.on
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.install --home "<spark-home>" --payload-json "{\"target\":\"kokoro\"}"
 ```
 
+From Telegram, approved operators can also ask for the full local stack:
+
+```text
+/voice install local
+```
+
+That installs local listening (`faster-whisper`) and local speaking (`kokoro-onnx` + `soundfile`) into Spark's active Python runtime. For one side only, use `/voice install faster-whisper` or `/voice install kokoro`.
+
 If your Builder CLI version supports `--payload-json`, you can run a deterministic local transcribe smoke without a provider:
 
 ```bash

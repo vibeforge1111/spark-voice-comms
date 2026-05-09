@@ -37,6 +37,8 @@ From Telegram, ask:
 /voice onboard
 /voice provider
 /voice install kokoro
+/voice install faster-whisper
+/voice install local
 /voice onboard local
 /voice onboard paid
 ```
@@ -57,6 +59,19 @@ Make it warmer and a little faster.
 Provider changes, voice search, auditions, tuning, and rollback are owned by the host Builder route. The chip supplies the speech hooks and provider adapters; Builder owns conversation, memory, personality, scoped preferences, and Telegram composition.
 
 ## 4. Local/Free Smoke
+
+For the easiest local path from Telegram, ask the agent:
+
+```text
+/voice install local
+```
+
+That installs the local listening package (`faster-whisper`) and the local neural speaking package (`kokoro-onnx` + `soundfile`) in the Python runtime used by Spark. If you only need one side:
+
+```text
+/voice install faster-whisper
+/voice install kokoro
+```
 
 Run the onboarding hook:
 

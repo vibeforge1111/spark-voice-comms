@@ -27,6 +27,8 @@ Users can ask:
 - `Can you help me set up voice?`
 - `Install Kokoro voice locally`
 - `/voice install kokoro`
+- `/voice install faster-whisper`
+- `/voice install local`
 - `voice onboard local`
 - `voice onboard paid`
 - `Can I use free local TTS?`
@@ -46,7 +48,7 @@ python -m pip install -e ".[local]"
 python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.onboard --home "<spark-home>" --payload-json "{\"route\":\"local\"}"
 ```
 
-If the user asks from Telegram and is an approved operator, route `/voice install kokoro` through `voice.install` before asking them to add model paths. Do not install hosted-provider SDKs or collect provider keys in Telegram.
+If the user asks from Telegram and is an approved operator, route `/voice install local` through `voice.install` for the full private/free stack. It installs local STT (`faster-whisper`) plus local neural TTS (`kokoro-onnx` + `soundfile`) in Spark's active Python runtime. Use `/voice install faster-whisper` or `/voice install kokoro` when the user wants only one side. Do not install hosted-provider SDKs or collect provider keys in Telegram.
 
 For provider keys, point users to their local Builder env file or Spark's secret layer. `.env.example` shows the safe shape for ElevenLabs, GPT Realtime 2, Kokoro, pyttsx3, and planned MiniMax/Z.ai slots. Codex CLI can run agent missions, but it is not a native STT/TTS provider for this chip.
 
