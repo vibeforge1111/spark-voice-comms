@@ -187,6 +187,8 @@ Implemented in this repo:
 - local deterministic fallback transcripts
 - local faster-whisper by default for Telegram voice notes
 - Telegram-targeted Opus output selection for `voice.speak`
+- `runtime_state` on `voice.status` and `voice.speak`, so hosts can render one readiness truth
+- `delivery_trace` and `coherence` metadata on `voice.speak`, separating synthesis from Telegram delivery and caption/audio consistency
 
 Activation status depends on the host Spark runtime. A Spark agent may have this chip installed but still report voice as unavailable until the operator approves the connector and provider setup is verified.
 
@@ -210,6 +212,7 @@ This repo is licensed under the GNU Affero General Public License v3.0 only. See
 - [Agent onboarding playbook](./docs/AGENT_ONBOARDING_PLAYBOOK.md)
 - [Provider options](./docs/PROVIDER_OPTIONS.md)
 - [Provider compatibility](./docs/PROVIDER_COMPATIBILITY_2026-04-09.md)
+- [Voice hardening map](./docs/VOICE_HARDENING_MAP_2026-05-09.md)
 - [Builder boundary](./docs/BUILDER_BOUNDARY_2026-04-09.md)
 - [Implementation plan](./docs/VOICE_COMMS_IMPLEMENTATION_PLAN_2026-04-09.md)
 - [Public release checklist](./docs/PUBLIC_RELEASE_CHECKLIST.md)
