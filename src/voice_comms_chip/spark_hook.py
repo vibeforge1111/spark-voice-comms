@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -582,6 +583,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
+    synthesize_started = time.perf_counter()
     if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
     elif request["provider_id"] == LOCAL_TTS_PROVIDER:
@@ -590,13 +592,25 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+    synthesize_ms = _elapsed_ms(synthesize_started)
+    runtime_payload = {
+        **payload,
+        "latency": _merge_latency(payload.get("latency"), synthesize_ms=synthesize_ms),
+    }
     runtime_state = state_from_speak(
         request=request,
         resolved_voice_id=resolved_voice_id,
         audio_bytes=audio_bytes,
         profile_summary=profile_summary,
-        payload=payload,
+        payload=runtime_payload,
     )
+    delivery_trace = _build_speak_delivery_trace(
+        request=request,
+        resolved_voice_id=resolved_voice_id,
+        audio_bytes=audio_bytes,
+        runtime_state=runtime_state,
+    )
+    coherence = _build_speak_coherence(request=request, payload=payload)
     return {
         "returncode": 0,
         "stdout": f"{request['provider_id']}:{resolved_voice_id}",
@@ -604,6 +618,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         "metrics": {
             "audio_bytes": len(audio_bytes),
             "text_characters": len(request["text"]),
+            "synthesize_ms": synthesize_ms,
         },
         "result": {
             "provider_id": request["provider_id"],
@@ -615,6 +630,8 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
             "voice_profile": profile_summary,
             "runtime_state": runtime_state,
+            "delivery_trace": delivery_trace,
+            "coherence": coherence,
         },
     }
 
@@ -936,6 +953,81 @@ def _active_tts_status(*, env_map: dict[str, str], local_tts_status: dict[str, A
     if local_tts_status.get("ready"):
         return local_tts_status
     return paid_tts_status
+
+
+def _build_speak_delivery_trace(
+    *,
+    request: dict[str, Any],
+    resolved_voice_id: str,
+    audio_bytes: bytes,
+    runtime_state: dict[str, Any],
+) -> dict[str, Any]:
+    delivery = runtime_state["telegram_delivery"]
+    status = str(delivery.get("last_send_voice_status") or "unknown")
+    failure_stage = "" if status == "success" else "host_delivery"
+    if status == "unknown":
+        failure_stage = "not_attempted_by_chip"
+    return {
+        "provider_id": request["provider_id"],
+        "voice_id_masked": runtime_state["tts"]["voice_id_masked"],
+        "voice_id_fingerprint": runtime_state["tts"]["voice_id_fingerprint"],
+        "mime_type": request["mime_type"],
+        "voice_compatible": bool(request["voice_compatible"]),
+        "audio_bytes": len(audio_bytes),
+        "synthesis_status": "success",
+        "telegram_delivery_status": status,
+        "telegram_delivery_ready": bool(delivery.get("ready")),
+        "failure_stage": failure_stage,
+        "failure_reason": str(delivery.get("last_failure_reason") or ""),
+        "delivery_boundary": (
+            "spark-voice-comms produced audio bytes; Telegram delivery is only proven after the host records sendVoice success."
+        ),
+    }
+
+
+def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    caption_text = str(payload.get("caption_text") or "").strip()
+    spoken_text = str(request["text"])
+    mode = str(payload.get("coherence_mode") or "exact").strip() or "exact"
+    caption_fingerprint = _text_fingerprint(caption_text)
+    spoken_fingerprint = _text_fingerprint(spoken_text)
+    if caption_text:
+        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "not_run"
+    else:
+        check = "passed"
+    return {
+        "mode": mode,
+        "spoken_text_characters": len(spoken_text),
+        "spoken_text_fingerprint": spoken_fingerprint,
+        "caption_text_characters": len(caption_text),
+        "caption_text_fingerprint": caption_fingerprint,
+        "caption_matches_spoken": bool(caption_text and caption_text == spoken_text),
+        "check": check,
+        "policy": "/voice speak reads exact supplied text; /voice ask must pass an already-generated answer into voice.speak.",
+    }
+
+
+def _merge_latency(latency_payload: Any, **updates: int) -> dict[str, int]:
+    latency = latency_payload if isinstance(latency_payload, dict) else {}
+    merged: dict[str, int] = {}
+    for key, value in latency.items():
+        try:
+            merged[str(key)] = max(0, int(float(value)))
+        except (TypeError, ValueError):
+            continue
+    for key, value in updates.items():
+        merged[key] = max(0, int(value))
+    return merged
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int((time.perf_counter() - started_at) * 1000))
+
+
+def _text_fingerprint(text: str) -> str:
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:

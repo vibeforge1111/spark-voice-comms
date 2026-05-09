@@ -697,6 +697,14 @@ def test_voice_speak_uses_profile_default_elevenlabs_voice(tmp_path):
     assert result["result"]["voice_id"] == FAKE_ELEVENLABS_VOICE_ID
     assert result["result"]["model_id"] == "eleven_turbo_v2_5"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fake-mpeg-bytes"
+    assert result["result"]["delivery_trace"]["synthesis_status"] == "success"
+    assert result["result"]["delivery_trace"]["telegram_delivery_status"] == "unknown"
+    assert result["result"]["delivery_trace"]["failure_stage"] == "not_attempted_by_chip"
+    assert result["result"]["delivery_trace"]["voice_id_masked"] == "fake...e-id"
+    assert result["result"]["coherence"]["mode"] == "exact"
+    assert result["result"]["coherence"]["spoken_text_characters"] == len("Operator status update.")
+    assert result["result"]["runtime_state"]["claim_levels"]["synthesis_ready"] is True
+    assert result["result"]["runtime_state"]["claim_levels"]["delivery_ready"] is False
     assert headers["xi-api-key"] == FAKE_ELEVENLABS_KEY
     assert headers["accept"] == "audio/mpeg"
     assert captured["url"].startswith(f"https://api.elevenlabs.io/v1/text-to-speech/{FAKE_ELEVENLABS_VOICE_ID}")
@@ -730,6 +738,11 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
                 "builder_env_file_path": str(env_file),
                 "surface": "telegram",
                 "text": "Telegram voice note reply.",
+                "caption_text": "Telegram voice note reply.",
+                "telegram_delivery": {
+                    "status": "success",
+                    "telegram_message_id": 12345,
+                },
             }
         )
 
@@ -739,6 +752,12 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
     assert result["result"]["voice_compatible"] is True
     assert str(result["result"]["filename"]).endswith(".ogg")
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fake-opus-bytes"
+    assert result["result"]["delivery_trace"]["telegram_delivery_status"] == "success"
+    assert result["result"]["delivery_trace"]["telegram_delivery_ready"] is True
+    assert result["result"]["delivery_trace"]["failure_stage"] == ""
+    assert result["result"]["coherence"]["caption_matches_spoken"] is True
+    assert result["result"]["runtime_state"]["telegram_delivery"]["telegram_message_id_present"] is True
+    assert result["result"]["runtime_state"]["claim_levels"]["delivery_ready"] is True
     assert headers["accept"] == "audio/mpeg"
     assert "output_format=opus_48000_64" in captured["url"]
     assert captured["body"]["text"] == "Telegram voice note reply."
