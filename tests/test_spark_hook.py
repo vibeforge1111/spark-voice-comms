@@ -658,6 +658,11 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
     headers = {str(key).lower(): value for key, value in captured["headers"].items()}
     assert result["returncode"] == 0
     assert result["result"]["transcript_text"] == "Voice via dedicated provider"
+    assert result["metrics"]["transcribe_ms"] >= 0
+    assert result["result"]["runtime_state"]["stt"]["provider_id"] == "openai"
+    assert result["result"]["runtime_state"]["latency"]["transcribe_ms"] >= 0
+    assert result["result"]["runtime_state"]["transcript"]["audio_bytes"] == len(b"fake-ogg-bytes")
+    assert result["result"]["runtime_state"]["claim_levels"]["delivery_ready"] is False
     assert captured["url"] == "https://api.openai.com/v1/audio/transcriptions"
     assert headers["authorization"] == f"Bearer {FAKE_OPENAI_KEY}"
 

@@ -123,6 +123,49 @@ def state_from_speak(
     )
 
 
+def state_from_transcribe(
+    *,
+    provider_id: str,
+    mode: str,
+    model: str,
+    audio_bytes: int,
+    transcript_text: str,
+    payload: dict[str, Any],
+    transcribe_ms: int = 0,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    surface = str(payload.get("surface") or "telegram").strip() or "telegram"
+    return build_voice_runtime_state(
+        surface=surface,
+        dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
+        stt={
+            "provider_id": provider_id,
+            "provider_kind": "local" if provider_id in {"local_faster_whisper", "deterministic_fallback"} else "hosted",
+            "mode": mode,
+            "ready": True,
+            "model": model,
+            "claim_boundary": "Transcription succeeded; TTS and Telegram delivery are separate claims.",
+            "last_failure_reason": fallback_reason or "",
+        },
+        tts={
+            "provider_id": "not_used",
+            "mode": "not_applicable",
+            "ready": False,
+        },
+        telegram_delivery={},
+        latency={"transcribe_ms": transcribe_ms},
+        source_ledger=["voice.transcribe"] + _optional_sources(payload),
+        legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
+    ) | {
+        "transcript": {
+            "characters": len(transcript_text),
+            "fingerprint": fingerprint(transcript_text),
+            "audio_bytes": max(0, int(audio_bytes)),
+            "fallback_reason": _safe_reason(fallback_reason),
+        }
+    }
+
+
 def _normalize_stt(stt: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider_id": str(stt.get("provider_id") or "none"),
@@ -131,6 +174,7 @@ def _normalize_stt(stt: dict[str, Any]) -> dict[str, Any]:
         "ready": bool(stt.get("ready")),
         "model": _optional_string(stt.get("model")),
         "last_probe_ref": _optional_string(stt.get("last_probe_ref")),
+        "last_failure_reason": _safe_reason(stt.get("last_failure_reason")),
         "claim_boundary": str(stt.get("claim_boundary") or "Readiness is scoped to this state section."),
     }
 

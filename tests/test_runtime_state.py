@@ -6,6 +6,7 @@ from voice_comms_chip.runtime_state import (
     build_voice_runtime_state,
     state_from_speak,
     state_from_status,
+    state_from_transcribe,
 )
 
 
@@ -81,3 +82,24 @@ def test_speak_state_marks_synthesis_ready_without_stt_claim():
     assert state["tts"]["ready"] is True
     assert state["claim_levels"]["synthesis_ready"] is True
     assert state["claim_levels"]["delivery_ready"] is False
+
+
+def test_transcribe_state_tracks_transcript_without_delivery_claim():
+    state = state_from_transcribe(
+        provider_id="openai",
+        mode="provider",
+        model="whisper-1",
+        audio_bytes=321,
+        transcript_text="Hello from a voice note.",
+        payload={"surface": "telegram"},
+        transcribe_ms=42,
+    )
+
+    assert state["stt"]["provider_id"] == "openai"
+    assert state["stt"]["ready"] is True
+    assert state["tts"]["ready"] is False
+    assert state["telegram_delivery"]["ready"] is False
+    assert state["latency"]["transcribe_ms"] == 42
+    assert state["transcript"]["characters"] == len("Hello from a voice note.")
+    assert state["transcript"]["audio_bytes"] == 321
+    assert state["claim_levels"]["conversation_ready"] is False

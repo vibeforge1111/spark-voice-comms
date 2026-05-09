@@ -21,7 +21,7 @@ from uuid import uuid4
 from typing import Any
 
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
-from .runtime_state import state_from_speak, state_from_status
+from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
 
 DEFAULT_TRANSCRIPTION_MODEL = "whisper-1"
 SUPPORTED_PROVIDER_KINDS = {"openai", "custom"}
@@ -637,6 +637,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    transcribe_started = time.perf_counter()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
     if not audio_base64:
         raise ValueError("voice.transcribe requires audio_base64.")
@@ -654,13 +655,18 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             )
         except Exception as exc:
             if fallback_mode == "deterministic":
-                return _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc))
+                return _with_transcribe_runtime_state(
+                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                    payload=payload,
+                    audio_bytes=len(audio_bytes),
+                    started_at=transcribe_started,
+                )
             raise RuntimeError(
                 "Local faster-whisper transcription failed before any hosted transcription call was made. "
                 "Fix local STT, or set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted transcription."
             ) from exc
         else:
-            return {
+            return _with_transcribe_runtime_state({
                 "returncode": 0,
                 "stdout": transcript_text,
                 "stderr": "",
@@ -675,7 +681,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                     "model": _resolve_local_faster_whisper_model(payload),
                     "mode": "local_faster_whisper",
                 },
-            }
+            }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
     if transcription_mode in {"auto", "local"}:
         raise ValueError(
             "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
@@ -691,14 +697,19 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
         )
     except Exception as exc:
         if fallback_mode == "deterministic":
-            return _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc))
+            return _with_transcribe_runtime_state(
+                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                payload=payload,
+                audio_bytes=len(audio_bytes),
+                started_at=transcribe_started,
+            )
         if _local_faster_whisper_available():
             transcript_text = _transcribe_with_local_faster_whisper(
                 payload=payload,
                 audio_bytes=audio_bytes,
                 filename=filename,
             )
-            return {
+            return _with_transcribe_runtime_state({
                 "returncode": 0,
                 "stdout": transcript_text,
                 "stderr": "",
@@ -714,9 +725,9 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                     "mode": "local_faster_whisper",
                     "fallback_reason": str(exc),
                 },
-            }
+            }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
         raise
-    return {
+    return _with_transcribe_runtime_state({
         "returncode": 0,
         "stdout": transcript_text,
         "stderr": "",
@@ -730,7 +741,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "model": DEFAULT_TRANSCRIPTION_MODEL,
             "mode": "provider",
         },
-    }
+    }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
 
 
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1189,6 +1200,32 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "fallback_reason": reason,
         },
     }
+
+
+def _with_transcribe_runtime_state(
+    response: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+    audio_bytes: int,
+    started_at: float,
+) -> dict[str, Any]:
+    result = response.get("result") if isinstance(response.get("result"), dict) else {}
+    transcribe_ms = _elapsed_ms(started_at)
+    metrics = response.get("metrics") if isinstance(response.get("metrics"), dict) else {}
+    metrics["transcribe_ms"] = transcribe_ms
+    response["metrics"] = metrics
+    result["runtime_state"] = state_from_transcribe(
+        provider_id=str(result.get("provider_id") or "unknown"),
+        mode=str(result.get("mode") or "unknown"),
+        model=str(result.get("model") or ""),
+        audio_bytes=audio_bytes,
+        transcript_text=str(result.get("transcript_text") or ""),
+        payload=payload,
+        transcribe_ms=transcribe_ms,
+        fallback_reason=str(result.get("fallback_reason") or ""),
+    )
+    response["result"] = result
+    return response
 
 
 def _transcription_provider_mode(payload: dict[str, Any]) -> str:
