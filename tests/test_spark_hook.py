@@ -472,6 +472,43 @@ def test_cli_main_accepts_utf8_sig_payload(tmp_path):
     assert payload["result"]["recommended_path"] == "local_free"
 
 
+def test_cli_main_exports_sanitized_runtime_state(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    runtime_state_path = tmp_path / "voice-runtime-state.json"
+    input_path.write_text('{"surface":"attachments_cli"}', encoding="utf-8")
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch.dict(
+        "os.environ",
+        {"SPARK_VOICE_RUNTIME_STATE_PATH": str(runtime_state_path)},
+        clear=False,
+    ):
+        exit_code = main()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(exported)
+    assert exit_code == 0
+    assert payload["result"]["runtime_state"]["schema_version"] == "spark.voice_runtime_state.v1"
+    assert exported["schema_version"] == "spark.voice_runtime_state.v1"
+    assert exported["stt"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is False
+    assert "transcript_text" not in encoded
+    assert "audio_base64" not in encoded
+    assert FAKE_OPENAI_KEY not in encoded
+
+
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     captured = {}
     payload = _payload(
