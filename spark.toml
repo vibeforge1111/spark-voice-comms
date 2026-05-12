@@ -22,6 +22,8 @@ capabilities = [
   "spark.voice.stt",
   "spark.voice.tts",
   "spark.voice.telegram_hooks",
+  "voice.speak",
+  "voice.transcribe",
 ]
 
 [needs]
