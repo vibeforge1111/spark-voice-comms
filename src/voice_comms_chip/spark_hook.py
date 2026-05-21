@@ -1210,7 +1210,8 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
     if not secret_value:
         raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing secret value for env ref '{secret_env_ref}'."
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing required secret. "
+            "Check that the env var referenced by secret_env_ref is set in your .env file."
         )
     return {
         "provider_id": provider_id,
@@ -1241,7 +1242,8 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
             raise ValueError(
-                f"Voice transcription is missing secret value for env ref '{resolved_secret_env_ref}'."
+                "Voice transcription is missing required secret. "
+                "Check that your transcription provider secret env var is set in your .env file."
             )
         return {
             "provider_id": "openai",
@@ -1406,7 +1408,7 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         raise ValueError("voice.speak requires a secret_env_ref for the TTS provider.")
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError("voice.speak is missing required TTS secret. Check your .env file for the ElevenLabs key.")
     provider_profile = get_provider_voice_profile(profile, "elevenlabs")
     speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
     voice_settings = tts.get("voice_settings")
@@ -1516,7 +1518,7 @@ def _resolve_openai_realtime_tts_request(
         raise ValueError("voice.speak requires a secret_env_ref for OpenAI Realtime.")
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError("voice.speak is missing required OpenAI Realtime secret. Check your .env file for the OpenAI key.")
     timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
