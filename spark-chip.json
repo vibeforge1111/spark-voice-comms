@@ -3,7 +3,7 @@
   "io_protocol": "spark-hook-io.v1",
   "chip_name": "spark-voice-comms",
   "domain": "voice-communications",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Modular voice communications hooks for Spark Intelligence Builder.",
   "capabilities": ["voice.status", "voice.plan", "voice.onboard", "voice.install", "voice.transcribe", "voice.speak"],
   "commands": {
