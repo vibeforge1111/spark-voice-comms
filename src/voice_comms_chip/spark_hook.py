@@ -1457,7 +1457,9 @@ def _resolve_kokoro_tts_request(
         raise ValueError(
             f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
         )
-    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
+    speed = _resolve_optional_float(
+        _first_non_none(tts.get("speed"), env_map.get(ENV_KOKORO_SPEED))
+    )
     if speed is None:
         speed = 1.0
     return {
@@ -1486,8 +1488,12 @@ def _resolve_local_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
-    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
+    rate = _resolve_optional_float(
+        _first_non_none(tts.get("rate"), env_map.get(ENV_LOCAL_TTS_RATE))
+    )
+    volume = _resolve_optional_float(
+        _first_non_none(tts.get("volume"), env_map.get(ENV_LOCAL_TTS_VOLUME))
+    )
     voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
     return {
         "provider_id": LOCAL_TTS_PROVIDER,
@@ -1517,7 +1523,9 @@ def _resolve_openai_realtime_tts_request(
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
-    timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+    timeout_seconds = _resolve_optional_float(
+        _first_non_none(tts.get("timeout_seconds"), env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+    )
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
     sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
@@ -1556,13 +1564,23 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
 
 
 def _resolve_optional_float(value: Any) -> float | None:
-    text = str(value or "").strip()
+    if value is None:
+        return None
+    text = str(value).strip()
     if not text:
         return None
     try:
         return float(text)
     except ValueError:
         return None
+
+
+def _first_non_none(*values: Any) -> Any:
+    """Return the first argument that is not None, or None if all are None."""
+    for v in values:
+        if v is not None:
+            return v
+    return None
 
 
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
