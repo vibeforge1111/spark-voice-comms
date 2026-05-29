@@ -1129,3 +1129,67 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+def test_env_parser_strips_surrounding_quotes(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'OPENAI_API_KEY="fake-quoted-key"',
+                "VOICE_TRANSCRIBE_PROVIDER=openai",
+                "VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY",
+                "VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
+        result = handle_voice_status_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "provider": {
+                    "provider_id": "openai",
+                    "provider_kind": "openai",
+                    "auth_method": "api_key_env",
+                    "base_url": "https://api.openai.com/v1",
+                    "secret_env_ref": "OPENAI_API_KEY",
+                },
+            }
+        )
+    assert result["returncode"] == 0
+    assert result["result"]["ready"] is True
+    assert result["result"]["provider_id"] == "openai"
+
+
+def test_env_parser_handles_export_prefix(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"export OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TRANSCRIBE_PROVIDER=openai",
+                "VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY",
+                "VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False):
+        result = handle_voice_status_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "provider": {
+                    "provider_id": "openai",
+                    "provider_kind": "openai",
+                    "auth_method": "api_key_env",
+                    "base_url": "https://api.openai.com/v1",
+                    "secret_env_ref": "OPENAI_API_KEY",
+                },
+            }
+        )
+    assert result["returncode"] == 0
+    assert result["result"]["ready"] is True
+    assert result["result"]["provider_id"] == "openai"
