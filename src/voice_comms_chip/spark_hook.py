@@ -1784,10 +1784,16 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
 
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+    http_equiv = normalized
+    if http_equiv.startswith("ws://"):
+        http_equiv = "http://" + http_equiv[len("ws://"):]
+    elif http_equiv.startswith("wss://"):
+        http_equiv = "https://" + http_equiv[len("wss://"):]
+    _validate_tts_base_url(http_equiv)
     if normalized.startswith("http://"):
-        normalized = "ws://" + normalized[len("http://") :]
+        normalized = "ws://" + normalized[len("http://"):]
     elif normalized.startswith("https://"):
-        normalized = "wss://" + normalized[len("https://") :]
+        normalized = "wss://" + normalized[len("https://"):]
     if not normalized.endswith("/realtime"):
         normalized = f"{normalized}/realtime"
     return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
@@ -1964,7 +1970,7 @@ def _transcribe_with_provider(
     mime_type: str,
 ) -> str:
     payload = _post_multipart(
-        _join_url(provider["base_url"], "audio/transcriptions"),
+        _join_url(provider["base_url"], "audio/transcriptions", strict=False),
         headers={"Authorization": f"Bearer {provider['secret_value']}"},
         fields={"model": DEFAULT_TRANSCRIPTION_MODEL},
         files=[
@@ -2047,7 +2053,77 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     return ""
 
 
-def _join_url(base_url: str, suffix: str) -> str:
+_ALLOWED_TTS_HOSTS = frozenset({
+    "api.elevenlabs.io",
+    "api.openai.com",
+    "localhost",
+    "127.0.0.1",
+    "::1",
+})
+
+
+class UnsafeTTSUrl(ValueError):
+    """Raised when a TTS base URL targets a non-public or disallowed host."""
+
+
+def _validate_tts_base_url(base_url: str) -> str:
+    """Validate that a TTS base URL targets an allowed, public host.
+
+    Prevents SSRF by ensuring user-supplied base_url values cannot target
+    internal services, private networks, or non-approved TTS providers.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+    parsed = urlparse(str(base_url).strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+    if scheme not in ("http", "https"):
+        raise UnsafeTTSUrl(f"TTS base URL scheme must be http or https, got '{scheme}'.")
+    if not host:
+        raise UnsafeTTSUrl("TTS base URL host is required.")
+    if scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
+        raise UnsafeTTSUrl("TTS base URL must use HTTPS for non-local hosts.")
+    if host not in _ALLOWED_TTS_HOSTS:
+        allowed = ", ".join(sorted(_ALLOWED_TTS_HOSTS))
+        raise UnsafeTTSUrl(
+            f"TTS base URL host '{host}' is not in the allowed set: {allowed}."
+        )
+    return str(base_url).strip()
+
+
+def _validate_provider_base_url(base_url: str) -> str:
+    """Validate that a provider base URL is safe (HTTPS, not private IP).
+
+    General SSRF protection for transcription provider URLs that may use
+    custom hosts beyond the TTS allowlist.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+    parsed = urlparse(str(base_url).strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+    if scheme not in ("http", "https"):
+        raise UnsafeTTSUrl(f"Provider base URL scheme must be http or https, got '{scheme}'.")
+    if not host:
+        raise UnsafeTTSUrl("Provider base URL host is required.")
+    if scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
+        raise UnsafeTTSUrl("Provider base URL must use HTTPS for non-local hosts.")
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return str(base_url).strip()
+    try:
+        addr = ipaddress.ip_address(host)
+        if not addr.is_global:
+            raise UnsafeTTSUrl(f"Provider base URL host '{host}' resolves to a non-public address.")
+    except ValueError:
+        pass  # hostname, not a literal IP - OK
+    return str(base_url).strip()
+
+
+def _join_url(base_url: str, suffix: str, *, strict: bool = True) -> str:
+    if strict:
+        _validate_tts_base_url(base_url)
+    else:
+        _validate_provider_base_url(base_url)
     return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
 
 
