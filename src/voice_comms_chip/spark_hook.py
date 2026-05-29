@@ -883,8 +883,9 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except Exception:
-            pass
+        except Exception as exc:
+            import sys as _sys
+            _sys.stderr.write(f"[spark-voice-comms] failed to read env file '{env_file_path}': {exc}\n")
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
