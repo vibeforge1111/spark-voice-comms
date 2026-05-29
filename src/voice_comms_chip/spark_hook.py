@@ -1811,7 +1811,9 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
+    except Exception as exc:
+        import sys as _sys
+        _sys.stderr.write(f"[spark-voice-comms] ElevenLabs voice list request failed: {exc}\n")
         return None
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list) or not voices:
