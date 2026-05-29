@@ -1916,7 +1916,9 @@ def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
             try:
                 return max(1, int(configured))
             except ValueError:
-                pass
+                import sys as _sys
+                _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5
+")
     return 5
 
 
