@@ -564,7 +564,10 @@ def test_cli_main_writes_structured_error_for_invalid_json(tmp_path):
     assert payload["error_code"] == "voice_hook_invalid_json"
     assert payload["error"] == "Voice hook input must be valid JSON."
     assert payload["stderr"] == payload["error"]
+    assert payload["error_type"] == "JSONDecodeError"
+    assert payload["redaction"].startswith("public error envelope")
     assert payload["result"] == {}
+    assert "Expecting property name" not in encoded
     assert hostile_payload not in encoded
     assert "/tmp/private-builder.env" not in encoded
     assert "sk-live-secret" not in encoded
@@ -599,6 +602,8 @@ def test_cli_main_rejects_non_object_payload_before_hook_execution(tmp_path):
     assert payload["error"] == "Voice hook input must be a JSON object."
     assert payload["stderr"] == payload["error"]
     assert payload["result"] == {}
+    assert payload["error_type"] == "_PublicHookInputError"
+    assert payload["redaction"].startswith("public error envelope")
 
 
 def test_cli_main_rejects_oversized_hook_input_before_execution(tmp_path):

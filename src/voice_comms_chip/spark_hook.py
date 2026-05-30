@@ -2197,38 +2197,38 @@ def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
     raw = path.read_bytes()
     if len(raw) > _hook_input_limit_bytes(hook):
         raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
-    try:
-        payload = json.loads(raw.decode("utf-8-sig"))
-    except UnicodeDecodeError as exc:
-        raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
+    payload = json.loads(raw.decode("utf-8-sig"))
     if not isinstance(payload, dict):
         raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
     return payload
 
 
 def _hook_error_payload(exc: Exception) -> dict[str, Any]:
-    error_code = ""
-    if isinstance(exc, _PublicHookInputError):
-        detail = str(exc)
-        error_code = exc.error_code
-    elif isinstance(exc, json.JSONDecodeError):
-        detail = "Voice hook input must be valid JSON."
-        error_code = "voice_hook_invalid_json"
-    else:
-        detail = str(exc)
-    payload: dict[str, Any] = {
+    error_code, detail = _public_hook_error(exc)
+    return {
         "returncode": 1,
         "stdout": "",
         "stderr": detail,
         "metrics": {},
         "result": {},
         "error": detail,
+        "error_code": error_code,
+        "error_type": exc.__class__.__name__,
+        "redaction": "public error envelope; raw exception text, hook input, audio bytes, env/config values, and local paths are omitted",
     }
-    if error_code:
-        payload["error_code"] = error_code
-        payload["error_type"] = exc.__class__.__name__
-        payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
-    return payload
+
+
+def _public_hook_error(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, _PublicHookInputError):
+        return exc.error_code, str(exc)
+    if isinstance(exc, json.JSONDecodeError):
+        return "voice_hook_invalid_json", "Voice hook input must be valid JSON."
+    detail = " ".join((str(exc) or exc.__class__.__name__).split())
+    if detail == "Voice hook input must be a JSON object.":
+        return "voice_hook_input_not_object", detail
+    if detail == "Voice hook input is too large.":
+        return "voice_hook_input_too_large", detail
+    return "voice_hook_failed", "Voice hook failed before completing."
 
 
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
