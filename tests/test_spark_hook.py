@@ -294,7 +294,10 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
         assert check is False
         return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
 
-    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", side_effect=[False, True, True]), patch(
+    with patch("voice_comms_chip.spark_hook.sys.version_info", (3, 13, 0)), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        side_effect=[False, True, True],
+    ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
@@ -313,8 +316,23 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
     assert "Python:" not in result["result"]["reply_text"]
 
 
+def test_voice_install_requires_explicit_target():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        try:
+            handle_voice_install_hook({})
+        except ValueError as exc:
+            assert "requires an explicit `target`" in str(exc)
+        else:  # pragma: no cover - defensive assertion
+            raise AssertionError("voice.install should require an explicit target")
+
+    run.assert_not_called()
+
+
 def test_voice_install_kokoro_skips_pip_when_already_installed():
-    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+    with patch("voice_comms_chip.spark_hook.sys.version_info", (3, 13, 0)), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
         result = handle_voice_install_hook({"target": "kokoro"})
@@ -339,7 +357,10 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
             "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
         },
         clear=False,
-    ), patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+    ), patch("voice_comms_chip.spark_hook.sys.version_info", (3, 13, 0)), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
         result = handle_voice_install_hook({"target": "kokoro"})
@@ -385,7 +406,10 @@ def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
 
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", side_effect=[False, True]), patch(
+    with patch("voice_comms_chip.spark_hook.sys.version_info", (3, 13, 0)), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=[False, True],
+    ), patch(
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         side_effect=[False, True, True],
     ), patch("voice_comms_chip.spark_hook._local_kokoro_ready", return_value=False), patch(
@@ -620,6 +644,11 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
     assert result["result"]["mode"] == "deterministic_fallback"
     assert "Deterministic fallback transcript" in result["result"]["transcript_text"]
     assert "simulated provider outage" in result["result"]["fallback_reason"]
+    assert result["result"]["routable"] is False
+    assert result["result"]["route_to_builder"] is False
+    assert result["result"]["diagnostic_only"] is True
+    assert result["result"]["transcript_source"] == "diagnostic_fallback"
+    assert "next command" not in result["result"]["transcript_text"].lower()
 
 
 def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fails(tmp_path):
