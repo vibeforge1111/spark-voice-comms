@@ -1186,7 +1186,7 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         raise ValueError("Builder did not provide a voice transcription provider payload.")
     provider_id = str(provider.get("provider_id") or "").strip()
     provider_kind = str(provider.get("provider_kind") or "").strip()
-    auth_method = str(provider.get("auth_method") or "").strip()
+    auth_method = str(provider.get("auth_method") or "api_key_env").strip()
     execution_transport = str(provider.get("execution_transport") or "").strip()
     base_url = str(provider.get("base_url") or "").strip()
     secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
