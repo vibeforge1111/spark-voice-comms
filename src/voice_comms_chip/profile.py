@@ -18,7 +18,13 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
             "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
             "profile path to load_voice_profile()."
         ) from exc
-    payload = json.loads(raw)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Voice profile at {target} is not valid JSON: {exc}. "
+            "Reinstall the voice-comms chip, or fix the profile file manually."
+        ) from exc
     if not isinstance(payload, dict):
         raise ValueError("Voice profile must be a JSON object.")
     return payload
