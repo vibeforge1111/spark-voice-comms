@@ -2127,8 +2127,8 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
     try:
+        payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
         if args.hook == "voice.status":
             result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
