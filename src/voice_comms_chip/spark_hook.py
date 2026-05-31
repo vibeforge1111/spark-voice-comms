@@ -1264,12 +1264,44 @@ def _read_env_value(*, env_file_path: str, key: str) -> str | None:
     return _runtime_env_map(env_file_path=env_file_path).get(key)
 
 
-def _read_env_map(*, env_file_path: str) -> dict[str, str]:
+_SPARK_CONFIG_ROOTS = (
+    Path.home() / ".spark",
+    Path.home() / ".spark" / "modules",
+)
+
+
+def _assert_env_file_within_spark_roots(env_file_path: str) -> Path:
+    """Restrict builder_env_file_path reads to Spark config directories.
+
+    Rejects /tmp, home root, and any path outside ~/.spark to prevent an
+    attacker-supplied path from reading /etc/passwd, SSH keys, or other
+    sensitive files on the host.
+    """
     path = Path(env_file_path)
-    if not path.exists():
+    try:
+        resolved = path.resolve()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Cannot resolve builder env file path: {exc}") from exc
+
+    allowed = [root.resolve() for root in _SPARK_CONFIG_ROOTS]
+    if not any(
+        resolved == root or resolved.is_relative_to(root)
+        for root in allowed
+    ):
+        raise ValueError(
+            f"Builder env file path '{env_file_path}' is outside the allowed "
+            "Spark config directories (~/.spark). "
+            "Env file must be within ~/.spark or ~/.spark/modules."
+        )
+    return resolved
+
+
+def _read_env_map(*, env_file_path: str) -> dict[str, str]:
+    resolved = _assert_env_file_within_spark_roots(env_file_path)
+    if not resolved.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
+    for line in resolved.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
