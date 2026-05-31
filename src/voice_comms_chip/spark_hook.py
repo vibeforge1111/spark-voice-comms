@@ -1983,6 +1983,11 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _reject_multipart_crlf(label: str, value: str) -> None:
+    if "\r" in value or "\n" in value:
+        raise ValueError(f"{label} must not contain CR or LF characters")
+
+
 def _post_multipart(
     url: str,
     *,
@@ -1993,17 +1998,25 @@ def _post_multipart(
     boundary = f"voice-chip-{uuid4().hex}"
     body = bytearray()
     for key, value in fields.items():
+        _reject_multipart_crlf("multipart field name", str(key))
+        _reject_multipart_crlf("multipart field value", str(value))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
         body.extend(str(value).encode("utf-8"))
         body.extend(b"\r\n")
     for file_info in files:
+        field_name = str(file_info["field_name"])
+        filename = str(file_info["filename"])
+        mime_type = str(file_info["mime_type"])
+        _reject_multipart_crlf("multipart file field name", field_name)
+        _reject_multipart_crlf("multipart filename", filename)
+        _reject_multipart_crlf("multipart content type", mime_type)
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(
             (
-                f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
-                f'filename="{file_info["filename"]}"\r\n'
-                f'Content-Type: {file_info["mime_type"]}\r\n\r\n'
+                f'Content-Disposition: form-data; name="{field_name}"; '
+                f'filename="{filename}"\r\n'
+                f'Content-Type: {mime_type}\r\n\r\n'
             ).encode("utf-8")
         )
         body.extend(bytes(file_info["content"]))
