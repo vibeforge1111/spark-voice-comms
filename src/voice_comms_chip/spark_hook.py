@@ -1266,22 +1266,23 @@ def _read_env_value(*, env_file_path: str, key: str) -> str | None:
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
-    # Restrict to paths the user's local Spark config area; prevent reading
-    # arbitrary files (e.g. /etc/passwd, secrets outside builder dir) via
-    # a caller-supplied builder_env_file_path in the request payload.
+    # Restrict reads to explicit Spark config roots only.
+    # Allowing the whole home directory or /tmp is too broad — arbitrary
+    # home files (e.g. ~/.ssh/id_rsa, ~/.aws/credentials) and temp files
+    # could be exfiltrated via a caller-controlled builder_env_file_path.
     resolved = path.resolve()
+    spark_root = (Path.home() / ".spark").resolve()
     allowed_roots = (
-        Path.home() / ".spark",
-        Path.home(),
-        Path("/tmp"),
+        spark_root,
+        spark_root / "envs",
     )
     if not any(
-        resolved == root.resolve() or resolved.is_relative_to(root.resolve())
+        resolved == root or resolved.is_relative_to(root)
         for root in allowed_roots
     ):
         raise ValueError(
-            f"Builder env file path '{env_file_path}' is outside allowed directories. "
-            "Env file must be within the user home or Spark config directory."
+            f"Builder env file path '{env_file_path}' is outside allowed Spark config roots. "
+            "Env file must be within ~/.spark or ~/.spark/envs."
         )
     if not path.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
