@@ -1174,6 +1174,14 @@ def _text_fingerprint(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def _missing_voice_secret_message(context: str) -> str:
+    label = str(context or "Voice provider").strip() or "Voice provider"
+    return (
+        f"{label} is missing a configured API secret. "
+        "Add the required provider key to your builder env file and retry."
+    )
+
+
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     dedicated_provider = _resolve_dedicated_transcription_provider(payload)
     if dedicated_provider is not None:
@@ -1206,11 +1214,13 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no env secret reference configured.")
+        raise ValueError(
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
+        )
     secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
     if not secret_value:
         raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing secret value for env ref '{secret_env_ref}'."
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
     return {
         "provider_id": provider_id,
@@ -1240,9 +1250,7 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
-            raise ValueError(
-                f"Voice transcription is missing secret value for env ref '{resolved_secret_env_ref}'."
-            )
+            raise ValueError(_missing_voice_secret_message("Voice transcription"))
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
@@ -1403,10 +1411,10 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
     secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for the TTS provider.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     provider_profile = get_provider_voice_profile(profile, "elevenlabs")
     speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
     voice_settings = tts.get("voice_settings")
@@ -1513,10 +1521,10 @@ def _resolve_openai_realtime_tts_request(
 ) -> dict[str, Any]:
     secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for OpenAI Realtime.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
