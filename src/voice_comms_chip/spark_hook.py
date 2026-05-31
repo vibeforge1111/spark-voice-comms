@@ -101,6 +101,51 @@ VOICE_ENV_KEYS = {
 }
 
 
+def _voice_machine_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    policy = payload.get("spark_machine_origin_policy")
+    if not isinstance(policy, dict):
+        policy = payload.get("machine_origin_policy")
+    return policy if isinstance(policy, dict) else {}
+
+
+def _voice_policy_allows(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    mutation_class: str,
+    external_network: bool = False,
+) -> bool:
+    policy = _voice_machine_policy(payload)
+    if policy.get("schema") != "spark.machine_origin_policy.v1":
+        return False
+    allowed_tools = policy.get("allowedTools")
+    mutation_classes = policy.get("mutationClassesAllowed")
+    if not isinstance(allowed_tools, list) or tool_name not in allowed_tools:
+        return False
+    if not isinstance(mutation_classes, list) or mutation_class not in mutation_classes:
+        return False
+    network_policy = str(policy.get("networkPolicy") or "none")
+    if external_network and network_policy not in {"allow", "external_allowed", "provider_allowed"}:
+        return False
+    return True
+
+
+def _require_voice_policy(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    mutation_class: str,
+    external_network: bool = False,
+) -> None:
+    if not _voice_policy_allows(
+        payload,
+        tool_name=tool_name,
+        mutation_class=mutation_class,
+        external_network=external_network,
+    ):
+        raise ValueError(f"{tool_name} requires spark.machine_origin_policy.v1 authority.")
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
@@ -250,7 +295,10 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
+    target = str(payload.get("target") or payload.get("provider") or "").strip().lower()
+    if not target:
+        raise ValueError("voice.install requires an explicit `target`: `kokoro`, `faster-whisper`, or `local`.")
+    _require_voice_policy(payload, tool_name="voice.install", mutation_class="writes_files")
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
@@ -716,6 +764,14 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
+    external_network = request["provider_id"] not in {LOCAL_KOKORO_TTS_PROVIDER, LOCAL_TTS_PROVIDER}
+    if external_network:
+        _require_voice_policy(
+            payload,
+            tool_name="voice.speak",
+            mutation_class="external_network",
+            external_network=True,
+        )
     synthesize_started = time.perf_counter()
     if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
@@ -779,6 +835,14 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
     fallback_mode = _resolve_fallback_mode(payload)
     transcription_mode = _transcription_provider_mode(payload)
+    external_network = transcription_mode not in {"auto", "local"}
+    if external_network:
+        _require_voice_policy(
+            payload,
+            tool_name="voice.transcribe",
+            mutation_class="external_network",
+            external_network=True,
+        )
     if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
         try:
             transcript_text = _transcribe_with_local_faster_whisper(
@@ -1331,6 +1395,10 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
             "fallback_reason": reason,
+            "routable": False,
+            "route_to_builder": False,
+            "diagnostic_only": True,
+            "transcript_source": "diagnostic_fallback",
         },
     }
 
@@ -1841,7 +1909,7 @@ def _build_deterministic_fallback_transcript(
     approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
     snippets = [
         "Ready when you are.",
-        "Holding for your next command.",
+        "Holding for a fresh voice note.",
         "Signal received and queued.",
         "Spark fallback captured your audio.",
         "Mic packet decoded locally.",
