@@ -1983,6 +1983,11 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _sanitize_header_value(value: str) -> str:
+    """Strip CR/LF to prevent header injection in multipart form bodies."""
+    return value.replace("\r", "").replace("\n", "")
+
+
 def _post_multipart(
     url: str,
     *,
@@ -1998,12 +2003,14 @@ def _post_multipart(
         body.extend(str(value).encode("utf-8"))
         body.extend(b"\r\n")
     for file_info in files:
+        safe_filename = _sanitize_header_value(str(file_info["filename"]))
+        safe_mime_type = _sanitize_header_value(str(file_info["mime_type"]))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(
             (
                 f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
-                f'filename="{file_info["filename"]}"\r\n'
-                f'Content-Type: {file_info["mime_type"]}\r\n\r\n'
+                f'filename="{safe_filename}"\r\n'
+                f'Content-Type: {safe_mime_type}\r\n\r\n'
             ).encode("utf-8")
         )
         body.extend(bytes(file_info["content"]))
