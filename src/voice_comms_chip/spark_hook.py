@@ -1192,7 +1192,10 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if provider_kind not in SUPPORTED_PROVIDER_KINDS:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime.")
+        supported = ", ".join(sorted(SUPPORTED_PROVIDER_KINDS))
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime. Supported provider kinds: {supported}."
+        )
     if execution_transport and execution_transport != "direct_http":
         raise ValueError(
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
@@ -1202,7 +1205,9 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
         )
     if not base_url:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured.")
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
