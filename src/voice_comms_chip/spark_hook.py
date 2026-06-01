@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -19,6 +20,8 @@ import wave
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
@@ -1816,7 +1819,11 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
+            exc,
+        )
         return None
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list) or not voices:
