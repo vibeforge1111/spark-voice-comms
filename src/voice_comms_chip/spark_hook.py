@@ -501,7 +501,7 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         return _process_voice_env_map()
 
 
@@ -883,7 +883,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except Exception:
+        except (OSError, ValueError):
             pass
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
@@ -1365,7 +1365,7 @@ def _transcription_provider_mode(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         env_map = _process_voice_env_map()
     provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
     if not provider_id:
