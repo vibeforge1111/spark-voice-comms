@@ -101,49 +101,80 @@ VOICE_ENV_KEYS = {
 }
 
 
-def _voice_machine_policy(payload: dict[str, Any]) -> dict[str, Any]:
-    policy = payload.get("spark_machine_origin_policy")
-    if not isinstance(policy, dict):
-        policy = payload.get("machine_origin_policy")
-    return policy if isinstance(policy, dict) else {}
+def _voice_turn_intent_vnext(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in (
+        "turn_intent_envelope_vnext",
+        "turnIntentEnvelopeVNext",
+        "spark_turn_intent_vnext",
+        "sparkTurnIntentVNext",
+        "turn_intent_payload",
+    ):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and candidate.get("schema_version") == "turn-intent-envelope-vnext":
+            return candidate
+    return {}
 
 
-def _voice_policy_allows(
+def _voice_action_type_for_mutation(mutation_class: str) -> str:
+    if mutation_class == "read_only":
+        return "read"
+    if mutation_class == "writes_files":
+        return "edit_file"
+    if mutation_class == "external_network":
+        return "external_api_call"
+    return "read"
+
+
+def _authorize_vnext_tool_call_for_voice(
     payload: dict[str, Any],
     *,
     tool_name: str,
     mutation_class: str,
     external_network: bool = False,
 ) -> bool:
-    policy = _voice_machine_policy(payload)
-    if policy.get("schema") != "spark.machine_origin_policy.v1":
+    envelope = _voice_turn_intent_vnext(payload)
+    if not envelope:
         return False
-    allowed_tools = policy.get("allowedTools")
-    mutation_classes = policy.get("mutationClassesAllowed")
-    if not isinstance(allowed_tools, list) or tool_name not in allowed_tools:
+    authority = envelope.get("action_authority")
+    if not isinstance(authority, dict):
         return False
-    if not isinstance(mutation_classes, list) or mutation_class not in mutation_classes:
+    if mutation_class == "read_only":
+        if authority.get("state") not in {"read_only", "executable"}:
+            return False
+    elif envelope.get("selected_move") != "execute_action" or authority.get("state") != "executable":
         return False
-    network_policy = str(policy.get("networkPolicy") or "none")
-    if external_network and network_policy not in {"allow", "external_allowed", "provider_allowed"}:
+    proposed_actions = envelope.get("proposed_actions")
+    if not isinstance(proposed_actions, list):
         return False
-    return True
+    capability_id = f"capability:spark-voice-comms:{tool_name}"
+    action_type = _voice_action_type_for_mutation(mutation_class)
+    for action in proposed_actions:
+        if not isinstance(action, dict):
+            continue
+        if action.get("capability_id") != capability_id:
+            continue
+        if action.get("action_type") != action_type:
+            continue
+        if external_network and action.get("action_type") != "external_api_call":
+            continue
+        return True
+    return False
 
 
-def _require_voice_policy(
+def _require_voice_vnext_authority(
     payload: dict[str, Any],
     *,
     tool_name: str,
     mutation_class: str,
     external_network: bool = False,
 ) -> None:
-    if not _voice_policy_allows(
+    if not _authorize_vnext_tool_call_for_voice(
         payload,
         tool_name=tool_name,
         mutation_class=mutation_class,
         external_network=external_network,
     ):
-        raise ValueError(f"{tool_name} requires spark.machine_origin_policy.v1 authority.")
+        raise ValueError(f"{tool_name} requires TurnIntentEnvelopeVNext authority.")
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -298,7 +329,7 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
     target = str(payload.get("target") or payload.get("provider") or "").strip().lower()
     if not target:
         raise ValueError("voice.install requires an explicit `target`: `kokoro`, `faster-whisper`, or `local`.")
-    _require_voice_policy(payload, tool_name="voice.install", mutation_class="writes_files")
+    _require_voice_vnext_authority(payload, tool_name="voice.install", mutation_class="writes_files")
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
@@ -765,13 +796,12 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
     external_network = request["provider_id"] not in {LOCAL_KOKORO_TTS_PROVIDER, LOCAL_TTS_PROVIDER}
-    if external_network:
-        _require_voice_policy(
-            payload,
-            tool_name="voice.speak",
-            mutation_class="external_network",
-            external_network=True,
-        )
+    _require_voice_vnext_authority(
+        payload,
+        tool_name="voice.speak",
+        mutation_class="external_network",
+        external_network=external_network,
+    )
     synthesize_started = time.perf_counter()
     if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
@@ -836,13 +866,12 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     fallback_mode = _resolve_fallback_mode(payload)
     transcription_mode = _transcription_provider_mode(payload)
     external_network = transcription_mode not in {"auto", "local"}
-    if external_network:
-        _require_voice_policy(
-            payload,
-            tool_name="voice.transcribe",
-            mutation_class="external_network",
-            external_network=True,
-        )
+    _require_voice_vnext_authority(
+        payload,
+        tool_name="voice.transcribe",
+        mutation_class="external_network",
+        external_network=external_network,
+    )
     if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
         try:
             transcript_text = _transcribe_with_local_faster_whisper(
