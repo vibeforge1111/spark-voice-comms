@@ -1278,8 +1278,13 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):]
         name, _, value = stripped.partition("=")
-        env_map[name.strip()] = value.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        env_map[name.strip()] = value
     return env_map
 
 
