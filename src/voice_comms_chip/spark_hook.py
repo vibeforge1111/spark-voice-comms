@@ -66,6 +66,8 @@ ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFO
 ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
+ENV_SPARK_HOME = "SPARK_HOME"
+VOICE_RUNTIME_STATE_RELATIVE_PATH = Path("state") / "spark-voice-comms" / "voice-runtime-state.json"
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -2203,15 +2205,54 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
+def default_voice_runtime_state_path() -> Path:
+    spark_home = Path(os.environ.get(ENV_SPARK_HOME, Path.home() / ".spark")).expanduser()
+    return spark_home / VOICE_RUNTIME_STATE_RELATIVE_PATH
+
+
+def _configured_runtime_state_path() -> Path | None:
     path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
     if not path_text:
-        return
+        return None
+    return Path(path_text).expanduser()
+
+
+def _runtime_state_from_hook_result(result: dict[str, Any]) -> dict[str, Any] | None:
     result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
     runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
+    return runtime_state
+
+
+def export_voice_runtime_state_for_spark_os(
+    payload: dict[str, Any] | None = None,
+    *,
+    output_path: Path | str | None = None,
+) -> dict[str, Any]:
+    status_payload = {"surface": "spark_os_healthcheck"}
+    if payload:
+        status_payload.update(payload)
+    result = handle_voice_status_hook(status_payload)
+    runtime_state = _runtime_state_from_hook_result(result)
+    if runtime_state is None:
+        raise RuntimeError("voice.status did not produce runtime_state")
+    target = (
+        Path(output_path).expanduser()
+        if output_path is not None
+        else (_configured_runtime_state_path() or default_voice_runtime_state_path())
+    )
+    public_state = _public_runtime_state(runtime_state)
+    _write_output(target, public_state)
+    return {"path": str(target), "runtime_state": public_state}
+
+
+def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
+    path = _configured_runtime_state_path()
+    if path is None:
+        return
+    runtime_state = _runtime_state_from_hook_result(result)
     if runtime_state is None:
         return
-    _write_output(Path(path_text).expanduser(), _public_runtime_state(runtime_state))
+    _write_output(path, _public_runtime_state(runtime_state))
 
 
 def main() -> int:

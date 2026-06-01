@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from voice_comms_chip.spark_hook import (
+    export_voice_runtime_state_for_spark_os,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
@@ -638,6 +639,33 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert exported["telegram_delivery"]["ready"] is False
     assert "transcript_text" not in encoded
     assert "audio_base64" not in encoded
+    assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_export_voice_runtime_state_for_spark_os_uses_spark_home(tmp_path):
+    spark_home = tmp_path / "spark-home"
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.dict(
+        "os.environ",
+        {
+            "SPARK_HOME": str(spark_home),
+            "VOICE_TTS_ELEVENLABS_VOICE_ID": FAKE_ELEVENLABS_VOICE_ID,
+            "OPENAI_API_KEY": FAKE_OPENAI_KEY,
+        },
+        clear=True,
+    ):
+        result = export_voice_runtime_state_for_spark_os()
+
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(exported)
+    assert result["path"] == str(runtime_state_path)
+    assert exported["schema_version"] == "spark.voice_runtime_state.v1"
+    assert exported["surface"] == "spark_os_healthcheck"
+    assert exported["stt"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is False
+    assert "metadata only" in exported["redaction"]
+    assert FAKE_ELEVENLABS_VOICE_ID not in encoded
     assert FAKE_OPENAI_KEY not in encoded
 
 
