@@ -19,6 +19,7 @@ from voice_comms_chip.spark_hook import (
     handle_voice_speak_hook,
     handle_voice_status_hook,
     handle_voice_transcribe_hook,
+    _read_env_map,
     main,
 )
 
@@ -56,6 +57,31 @@ def _payload(tmp_path, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_read_env_map_strips_matching_outer_quotes(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'DOUBLE_QUOTED="double-value"',
+                "SINGLE_QUOTED='single-value'",
+                "UNQUOTED=plain-value",
+                'UNMATCHED="keep-leading-quote',
+                'INNER_QUOTES=prefix"inner"suffix',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert _read_env_map(env_file_path=str(env_file)) == {
+        "DOUBLE_QUOTED": "double-value",
+        "SINGLE_QUOTED": "single-value",
+        "UNQUOTED": "plain-value",
+        "UNMATCHED": '"keep-leading-quote',
+        "INNER_QUOTES": 'prefix"inner"suffix',
+    }
 
 
 def test_voice_status_default_requires_local_faster_whisper(tmp_path):
