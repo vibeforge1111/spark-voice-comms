@@ -1272,6 +1272,13 @@ def _read_env_value(*, env_file_path: str, key: str) -> str | None:
     return _runtime_env_map(env_file_path=env_file_path).get(key)
 
 
+def _strip_surrounding_quotes(value: str) -> str:
+    """Strip matching surrounding single or double quotes from a value."""
+    if len(value) >= 2 and ((value[0] == value[-1]) and value[0] in ('"', "'")):
+        return value[1:-1]
+    return value
+
+
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
     if not path.exists():
@@ -1282,7 +1289,7 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         name, _, value = stripped.partition("=")
-        env_map[name.strip()] = value.strip()
+        env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
     return env_map
 
 
