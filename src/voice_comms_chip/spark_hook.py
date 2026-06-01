@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TTS_PROVIDER = "elevenlabs"
 LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
+LOCAL_MACOS_TTS_PROVIDER = "macos-say"
 OPENAI_REALTIME_TTS_PROVIDER = "openai-realtime"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
@@ -797,7 +799,11 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
-    external_network = request["provider_id"] not in {LOCAL_KOKORO_TTS_PROVIDER, LOCAL_TTS_PROVIDER}
+    external_network = request["provider_id"] not in {
+        LOCAL_KOKORO_TTS_PROVIDER,
+        LOCAL_TTS_PROVIDER,
+        LOCAL_MACOS_TTS_PROVIDER,
+    }
     _require_voice_vnext_authority(
         payload,
         tool_name="voice.speak",
@@ -809,6 +815,8 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
     elif request["provider_id"] == LOCAL_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
+    elif request["provider_id"] == LOCAL_MACOS_TTS_PROVIDER:
+        audio_bytes, resolved_voice_id = _synthesize_with_macos_say(request=request)
     elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
@@ -1153,6 +1161,12 @@ def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
             "provider": LOCAL_TTS_PROVIDER,
             "status": "ready via pyttsx3 basic system TTS",
         }
+    if _local_macos_say_available():
+        return {
+            "ready": True,
+            "provider": LOCAL_MACOS_TTS_PROVIDER,
+            "status": "ready via macOS say local system TTS",
+        }
     return {
         "ready": False,
         "provider": "none",
@@ -1185,7 +1199,7 @@ def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
 def _active_tts_status(*, env_map: dict[str, str], local_tts_status: dict[str, Any]) -> dict[str, Any]:
     selected_provider = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower()
     paid_tts_status = _paid_tts_status(env_map=env_map)
-    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "local"}:
+    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "macos-say", "say", "macos", "local"}:
         return local_tts_status
     if selected_provider in {"elevenlabs", *OPENAI_REALTIME_PROVIDER_ALIASES}:
         return paid_tts_status
@@ -1486,11 +1500,15 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     tts = tts_payload if isinstance(tts_payload, dict) else {}
     surface = str(payload.get("surface") or "").strip().lower()
     env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
+    provider_id = str(
+        tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or _default_tts_provider_id(env_map=env_map)
+    ).strip().lower() or DEFAULT_TTS_PROVIDER
     if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
         return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
         return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
+    if provider_id in {LOCAL_MACOS_TTS_PROVIDER, "say", "macos"}:
+        return _resolve_macos_say_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
         return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
@@ -1541,6 +1559,19 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
             "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
         },
     }
+
+
+def _default_tts_provider_id(*, env_map: dict[str, str]) -> str:
+    paid_tts_status = _paid_tts_status(env_map=env_map)
+    if paid_tts_status.get("ready"):
+        return str(paid_tts_status.get("provider") or DEFAULT_TTS_PROVIDER)
+    if _local_kokoro_ready(env_map=env_map):
+        return LOCAL_KOKORO_TTS_PROVIDER
+    if _local_pyttsx3_available():
+        return LOCAL_TTS_PROVIDER
+    if _local_macos_say_available():
+        return LOCAL_MACOS_TTS_PROVIDER
+    return DEFAULT_TTS_PROVIDER
 
 
 def _resolve_kokoro_tts_request(
@@ -1599,6 +1630,29 @@ def _resolve_local_tts_request(
         "voice_compatible": False,
         "rate": rate,
         "volume": volume,
+        "voice_name": voice_name,
+    }
+
+
+def _resolve_macos_say_tts_request(
+    *,
+    tts: dict[str, Any],
+    env_map: dict[str, str],
+    text: str,
+    surface: str,
+) -> dict[str, Any]:
+    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
+    voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
+    return {
+        "provider_id": LOCAL_MACOS_TTS_PROVIDER,
+        "surface": surface,
+        "text": text,
+        "voice_id": voice_name or "macos-system-voice",
+        "model_id": "macos-say",
+        "mime_type": "audio/wav",
+        "file_extension": ".wav",
+        "voice_compatible": False,
+        "rate": rate,
         "voice_name": voice_name,
     }
 
@@ -1745,6 +1799,56 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
         return audio_bytes, str(request.get("voice_id") or "local-system-voice")
     finally:
         if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _synthesize_with_macos_say(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    say_path = shutil.which("say")
+    afconvert_path = shutil.which("afconvert")
+    if not say_path or not afconvert_path:
+        raise RuntimeError("macOS say TTS requires local `say` and `afconvert` binaries.")
+    temp_paths: list[str] = []
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as text_file:
+            text_file.write(str(request["text"]))
+            text_path = text_file.name
+        temp_paths.append(text_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".aiff") as aiff_file:
+            aiff_path = aiff_file.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as wav_file:
+            wav_path = wav_file.name
+        temp_paths.extend([aiff_path, wav_path])
+
+        say_command = [say_path, "-o", aiff_path]
+        voice_name = str(request.get("voice_name") or "").strip()
+        if voice_name:
+            say_command.extend(["-v", voice_name])
+        rate = request.get("rate")
+        if rate is not None:
+            say_command.extend(["-r", str(int(float(rate)))])
+        say_command.extend(["-f", text_path])
+        subprocess.run(say_command, check=True, capture_output=True, text=True, timeout=30)
+        subprocess.run(
+            [afconvert_path, "-f", "WAVE", "-d", "LEI16", aiff_path, wav_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        audio_bytes = Path(wav_path).read_bytes()
+        if not audio_bytes:
+            raise RuntimeError("macOS say TTS returned empty audio.")
+        return audio_bytes, str(request.get("voice_id") or "macos-system-voice")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"macOS say TTS failed: {detail}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("macOS say TTS timed out.") from exc
+    finally:
+        for temp_path in temp_paths:
             try:
                 os.unlink(temp_path)
             except OSError:
@@ -1960,6 +2064,10 @@ def _local_faster_whisper_available() -> bool:
 
 def _local_pyttsx3_available() -> bool:
     return importlib.util.find_spec("pyttsx3") is not None
+
+
+def _local_macos_say_available() -> bool:
+    return bool(shutil.which("say") and shutil.which("afconvert"))
 
 
 def _local_kokoro_package_available() -> bool:

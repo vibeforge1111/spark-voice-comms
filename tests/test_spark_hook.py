@@ -215,7 +215,10 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
 
 
 def test_voice_status_prefers_local_transcription_when_available_even_with_openai_key(tmp_path):
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True):
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_macos_say_available",
+        return_value=False,
+    ):
         result = handle_voice_status_hook(_payload(tmp_path))
 
     assert result["returncode"] == 0
@@ -286,6 +289,28 @@ def test_voice_onboard_guides_local_free_path():
     assert "local voice is ready" in result["result"]["reply_text"]
     assert "one short voice reply" in result["result"]["reply_text"]
     assert "What I can see right now" not in result["result"]["reply_text"]
+
+
+def test_voice_onboard_uses_macos_say_when_optional_tts_is_missing():
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_ready",
+        return_value=False,
+    ), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=False,
+    ), patch(
+        "voice_comms_chip.spark_hook._local_pyttsx3_available",
+        return_value=False,
+    ), patch(
+        "voice_comms_chip.spark_hook._local_macos_say_available",
+        return_value=True,
+    ):
+        result = handle_voice_onboard_hook({"route": "local"})
+
+    assert result["returncode"] == 0
+    assert result["metrics"]["local_ready"] == 1
+    assert result["result"]["snapshot"]["local_tts"]["provider"] == "macos-say"
+    assert "local voice is ready" in result["result"]["reply_text"]
 
 
 def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
@@ -1065,6 +1090,51 @@ def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fake-local-wav"
     assert captured["properties"] == {"rate": 175, "volume": 0.8, "voice": "test-voice-id"}
     assert captured["text"] == "Local free voice."
+
+
+def test_voice_speak_defaults_to_macos_say_tts_when_no_paid_provider_is_ready():
+    captured: dict[str, object] = {}
+
+    def fake_which(name: str):
+        return f"/usr/bin/{name}" if name in {"say", "afconvert"} else None
+
+    def fake_run(command, *, check: bool, capture_output: bool, text: bool, timeout: int):
+        captured.setdefault("commands", []).append(command)
+        if command[0].endswith("/say"):
+            captured["spoken_text"] = Path(command[-1]).read_text(encoding="utf-8")
+            Path(command[2]).write_bytes(b"fake-aiff")
+        elif command[0].endswith("/afconvert"):
+            Path(command[-1]).write_bytes(b"fake-macos-wav")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("voice_comms_chip.spark_hook._local_kokoro_ready", return_value=False), patch(
+        "voice_comms_chip.spark_hook._local_pyttsx3_available",
+        return_value=False,
+    ), patch("voice_comms_chip.spark_hook.shutil.which", side_effect=fake_which), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+        side_effect=fake_run,
+    ):
+        result = handle_voice_speak_hook(
+            {
+                "text": "macOS local voice.",
+                "turn_intent_envelope_vnext": _voice_policy(),
+                "tts": {
+                    "voice_name": "Samantha",
+                    "rate": 180,
+                },
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["provider_id"] == "macos-say"
+    assert result["result"]["mime_type"] == "audio/wav"
+    assert result["result"]["voice_compatible"] is False
+    assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fake-macos-wav"
+    assert captured["spoken_text"] == "macOS local voice."
+    assert captured["commands"][0][:6] == ["/usr/bin/say", "-o", captured["commands"][0][2], "-v", "Samantha", "-r"]
+    assert captured["commands"][1][0] == "/usr/bin/afconvert"
+    assert result["result"]["runtime_state"]["tts"]["mode"] == "local"
+    assert result["result"]["runtime_state"]["claim_levels"]["synthesis_ready"] is True
 
 
 def test_voice_speak_supports_local_kokoro_tts(tmp_path):
