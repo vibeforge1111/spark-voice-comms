@@ -534,7 +534,9 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        import logging
+        logging.debug("env file read failed, falling back to process env: %s", exc)
         return _process_voice_env_map()
 
 
@@ -1415,9 +1417,9 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
         reason=reason,
     )
     return {
-        "returncode": 0,
+        "returncode": 1,
         "stdout": transcript_text,
-        "stderr": "",
+        "stderr": f"Deterministic fallback used: {reason}",
         "metrics": {
             "transcript_characters": len(transcript_text),
             "audio_bytes": len(audio_bytes),
@@ -1429,6 +1431,7 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
             "fallback_reason": reason,
+            "is_fallback": True,
         },
     }
 
@@ -2198,7 +2201,7 @@ def _join_url(base_url: str, suffix: str) -> str:
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(path.name + f".{uuid4().hex[:8]}.tmp")
     try:
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(path)
