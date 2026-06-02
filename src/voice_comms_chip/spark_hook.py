@@ -1857,7 +1857,11 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        deadline = time.monotonic() + timeout
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("OpenAI Realtime TTS: websocket receive timed out")
             raw_message = ws.recv()
             if not raw_message:
                 continue
