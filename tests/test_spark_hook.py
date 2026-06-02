@@ -323,10 +323,10 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
         assert check is False
         return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
 
-    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", side_effect=[False, True, True]), patch(
-        "voice_comms_chip.spark_hook.subprocess.run",
-        side_effect=fake_run,
-    ):
+    with patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        side_effect=[False, True, True],
+    ), patch("voice_comms_chip.spark_hook.subprocess.run", side_effect=fake_run):
         result = handle_voice_install_hook({"target": "kokoro"})
 
     assert result["returncode"] == 0
@@ -343,7 +343,10 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
 
 
 def test_voice_install_kokoro_skips_pip_when_already_installed():
-    with patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+    with patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
         result = handle_voice_install_hook({"target": "kokoro"})
@@ -368,7 +371,10 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
             "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
         },
         clear=False,
-    ), patch("voice_comms_chip.spark_hook._local_kokoro_package_available", return_value=True), patch(
+    ), patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
+        "voice_comms_chip.spark_hook._local_kokoro_package_available",
+        return_value=True,
+    ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
         result = handle_voice_install_hook({"target": "kokoro"})
@@ -407,6 +413,33 @@ def test_voice_install_faster_whisper_runs_local_pip_when_missing():
     assert "send one short Telegram voice note" in result["result"]["reply_text"]
 
 
+def test_voice_install_kokoro_reports_unsupported_python_runtime():
+    message = "kokoro-onnx failed from /tmp/private-runtime with sk-live-secret and traceback detail."
+
+    with patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=message), patch(
+        "voice_comms_chip.spark_hook.subprocess.run",
+    ) as run:
+        result = handle_voice_install_hook({"target": "kokoro"})
+
+    encoded = json.dumps(result)
+    assert result["returncode"] == 1
+    assert result["stdout"] == ""
+    assert result["stderr"] == "Kokoro install is not supported in this Python runtime."
+    assert result["error"] == result["stderr"]
+    assert result["error_code"] == "voice_install_unsupported_runtime"
+    assert result["metrics"]["installed"] == 0
+    assert result["result"]["error_code"] == "voice_install_unsupported_runtime"
+    assert result["result"]["installed"] is False
+    assert result["result"]["kokoro_ready"] is False
+    assert "cannot run in this Python runtime" in result["result"]["reply_text"]
+    assert "Python 3.10-3.13" in result["result"]["reply_text"]
+    assert message not in encoded
+    assert "/tmp/private-runtime" not in encoded
+    assert "sk-live-secret" not in encoded
+    assert "traceback" not in encoded.lower()
+    run.assert_not_called()
+
+
 def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
     calls: list[list[str]] = []
 
@@ -414,7 +447,10 @@ def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="installed ok\n", stderr="")
 
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", side_effect=[False, True]), patch(
+    with patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=[False, True],
+    ), patch(
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         side_effect=[False, True, True],
     ), patch("voice_comms_chip.spark_hook._local_kokoro_ready", return_value=False), patch(
@@ -499,6 +535,100 @@ def test_cli_main_accepts_utf8_sig_payload(tmp_path):
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert exit_code == 0
     assert payload["result"]["recommended_path"] == "local_free"
+
+
+def test_cli_main_writes_structured_error_for_invalid_json(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    hostile_payload = "{bad json with /tmp/private-builder.env and sk-live-secret"
+    input_path.write_text(hostile_payload, encoding="utf-8")
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ):
+        exit_code = main()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(payload)
+    assert exit_code == 1
+    assert payload["returncode"] == 1
+    assert payload["error_code"] == "voice_hook_invalid_json"
+    assert payload["error"] == "Voice hook input must be valid JSON."
+    assert payload["stderr"] == payload["error"]
+    assert payload["result"] == {}
+    assert hostile_payload not in encoded
+    assert "/tmp/private-builder.env" not in encoded
+    assert "sk-live-secret" not in encoded
+
+
+def test_cli_main_rejects_non_object_payload_before_hook_execution(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    input_path.write_text("[]", encoding="utf-8")
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch(
+        "voice_comms_chip.spark_hook.handle_voice_status_hook",
+        side_effect=AssertionError("non-object input should not execute hook logic"),
+    ):
+        exit_code = main()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 1
+    assert payload["returncode"] == 1
+    assert payload["error_code"] == "voice_hook_input_not_object"
+    assert payload["error"] == "Voice hook input must be a JSON object."
+    assert payload["stderr"] == payload["error"]
+    assert payload["result"] == {}
+
+
+def test_cli_main_rejects_oversized_hook_input_before_execution(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    input_path.write_text('{"padding":"xxxxxxxx"}', encoding="utf-8")
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch("voice_comms_chip.spark_hook.MAX_HOOK_INPUT_BYTES", 8), patch(
+        "voice_comms_chip.spark_hook.handle_voice_status_hook",
+        side_effect=AssertionError("oversized input should not execute hook logic"),
+    ):
+        exit_code = main()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 1
+    assert payload["returncode"] == 1
+    assert payload["error_code"] == "voice_hook_input_too_large"
+    assert payload["error"] == "Voice hook input is too large."
+    assert payload["result"] == {}
 
 
 def test_cli_main_exports_sanitized_runtime_state(tmp_path):
@@ -622,6 +752,117 @@ def test_voice_transcribe_auto_requires_local_faster_whisper_when_local_is_unava
     ):
         with pytest.raises(ValueError, match="Local faster-whisper transcription is the default"):
             handle_voice_transcribe_hook(payload)
+
+
+def test_voice_transcribe_rejects_malformed_audio_base64_before_provider_checks(tmp_path):
+    raw_payload = "!!!!/tmp/private-audio.ogg/sk-live-secret"
+    payload = _payload(
+        tmp_path,
+        audio_base64=raw_payload,
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+    )
+
+    with patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("audio validation should run before provider readiness checks"),
+    ):
+        with pytest.raises(ValueError, match="audio_base64 must be valid base64"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_cli_main_returns_bounded_error_for_malformed_audio_base64(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    raw_payload = "!!!!/tmp/private-audio.ogg/sk-live-secret"
+    input_path.write_text(
+        json.dumps({"audio_base64": raw_payload, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"}),
+        encoding="utf-8",
+    )
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.transcribe",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("audio validation should run before provider readiness checks"),
+    ):
+        exit_code = main()
+
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(result)
+    assert exit_code == 1
+    assert result["returncode"] == 1
+    assert result["error_code"] == "voice_transcribe_audio_invalid_base64"
+    assert result["error"] == "voice.transcribe audio_base64 must be valid base64 audio bytes."
+    assert result["stderr"] == result["error"]
+    assert result["stdout"] == ""
+    assert result["result"] == {}
+    assert raw_payload not in encoded
+    assert "/tmp/private-audio.ogg" not in encoded
+    assert "sk-live-secret" not in encoded
+
+
+def test_voice_transcribe_rejects_oversized_audio_before_provider_checks(tmp_path):
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+    )
+
+    with patch("voice_comms_chip.spark_hook.MAX_TRANSCRIBE_AUDIO_BYTES", 4), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("audio validation should run before provider readiness checks"),
+    ):
+        with pytest.raises(ValueError, match="too large"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_cli_main_returns_bounded_error_for_oversized_audio(tmp_path):
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    audio_base64 = base64.b64encode(b"fake-ogg-bytes").decode("ascii")
+    input_path.write_text(
+        json.dumps({"audio_base64": audio_base64, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"}),
+        encoding="utf-8",
+    )
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.transcribe",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch("voice_comms_chip.spark_hook.MAX_TRANSCRIBE_AUDIO_BYTES", 4), patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("audio validation should run before provider readiness checks"),
+    ):
+        exit_code = main()
+
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(result)
+    assert exit_code == 1
+    assert result["returncode"] == 1
+    assert result["error_code"] == "voice_transcribe_audio_too_large"
+    assert result["error"] == "voice.transcribe audio_base64 is too large."
+    assert result["stderr"] == result["error"]
+    assert result["stdout"] == ""
+    assert result["result"] == {}
+    assert audio_base64 not in encoded
 
 
 
