@@ -1680,8 +1680,14 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
         soundfile = importlib.import_module("soundfile")
     except Exception as exc:
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
-    model_path = Path(str(request.get("model_path") or ""))
-    voices_path = Path(str(request.get("voices_path") or ""))
+    raw_model_path = str(request.get("model_path") or "").strip()
+    raw_voices_path = str(request.get("voices_path") or "").strip()
+    if not raw_model_path:
+        raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
+    if not raw_voices_path:
+        raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
+    model_path = Path(raw_model_path)
+    voices_path = Path(raw_voices_path)
     if not model_path.exists():
         raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
     if not voices_path.exists():
