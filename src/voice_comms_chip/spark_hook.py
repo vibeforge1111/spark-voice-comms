@@ -1417,7 +1417,16 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
         return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
-        raise ValueError(f"voice.speak does not yet support provider '{provider_id}'.")
+        supported_providers = sorted(
+            {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}
+            | {LOCAL_TTS_PROVIDER, "local"}
+            | OPENAI_REALTIME_PROVIDER_ALIASES
+            | {"elevenlabs"}
+        )
+        raise ValueError(
+            f"voice.speak does not yet support provider {provider_id!r}. "
+            f"Supported provider_id values: {', '.join(supported_providers)}."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice synthesis.")
     auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
