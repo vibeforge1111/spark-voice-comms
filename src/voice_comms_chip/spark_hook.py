@@ -1472,7 +1472,7 @@ def _resolve_kokoro_tts_request(
         "voice_compatible": False,
         "model_path": model_path,
         "voices_path": voices_path,
-        "speed": max(0.5, min(2.0, float(speed))),
+        "speed": max(0.5, min(2.0, float(speed) if speed is not None else 1.0)),
         "lang": str(tts.get("lang") or env_map.get(ENV_KOKORO_LANG) or DEFAULT_KOKORO_LANG).strip()
         or DEFAULT_KOKORO_LANG,
     }
