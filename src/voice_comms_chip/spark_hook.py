@@ -727,6 +727,11 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
+        logger.warning(
+            "voice.speak: provider_id=%r is not a recognized local or realtime provider, "
+            "falling back to ElevenLabs TTS",
+            request["provider_id"],
+        )
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
     synthesize_ms = _elapsed_ms(synthesize_started)
     runtime_payload = {
