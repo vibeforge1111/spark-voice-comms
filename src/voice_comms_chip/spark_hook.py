@@ -119,6 +119,22 @@ def _voice_turn_intent_vnext(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _voice_governor_decision(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in (
+        "governor_decision",
+        "governorDecision",
+        "harness_core_governor_decision",
+        "harnessCoreGovernorDecision",
+        "spark_governor_decision",
+        "sparkGovernorDecision",
+        "authority",
+    ):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and candidate.get("schema_version") == "governor-decision-v1":
+            return candidate
+    return {}
+
+
 def _voice_action_type_for_mutation(mutation_class: str) -> str:
     if mutation_class == "read_only":
         return "read"
@@ -129,29 +145,35 @@ def _voice_action_type_for_mutation(mutation_class: str) -> str:
     return "read"
 
 
-def _authorize_vnext_tool_call_for_voice(
+def _voice_governor_allows_tool_call(
     payload: dict[str, Any],
     *,
     tool_name: str,
     mutation_class: str,
     external_network: bool = False,
 ) -> bool:
-    envelope = _voice_turn_intent_vnext(payload)
-    if not envelope:
+    governor = _voice_governor_decision(payload)
+    if not governor:
+        return False
+    if governor.get("outcome") != "execute":
+        return False
+    execution_boundary = governor.get("execution_boundary")
+    if not isinstance(execution_boundary, dict) or not execution_boundary.get("action_authorized"):
+        return False
+    envelope = governor.get("envelope")
+    if not isinstance(envelope, dict) or envelope.get("schema_version") != "turn-intent-envelope-vnext":
         return False
     authority = envelope.get("action_authority")
     if not isinstance(authority, dict):
         return False
-    if mutation_class == "read_only":
-        if authority.get("state") not in {"read_only", "executable"}:
-            return False
-    elif envelope.get("selected_move") != "execute_action" or authority.get("state") != "executable":
+    if envelope.get("selected_move") != "execute_action" or authority.get("state") != "executable":
         return False
     proposed_actions = envelope.get("proposed_actions")
     if not isinstance(proposed_actions, list):
         return False
     capability_id = f"capability:spark-voice-comms:{tool_name}"
     action_type = _voice_action_type_for_mutation(mutation_class)
+    matching_actions = []
     for action in proposed_actions:
         if not isinstance(action, dict):
             continue
@@ -161,24 +183,77 @@ def _authorize_vnext_tool_call_for_voice(
             continue
         if external_network and action.get("action_type") != "external_api_call":
             continue
+        matching_actions.append(action)
+    if not matching_actions:
+        return False
+    action_ids = {str(action.get("action_id") or "") for action in matching_actions}
+    authorizations = governor.get("authorizations")
+    if not isinstance(authorizations, list):
+        return False
+    matching_authorizations = []
+    for authorization in authorizations:
+        if not isinstance(authorization, dict):
+            continue
+        if authorization.get("schema_version") != "authorization-decision-v1":
+            continue
+        if authorization.get("verdict") != "allow":
+            continue
+        if authorization.get("capability_id") != capability_id:
+            continue
+        if str(authorization.get("action_id") or "") not in action_ids:
+            continue
+        restrictions = authorization.get("restrictions")
+        if not isinstance(restrictions, dict):
+            return False
+        if external_network and restrictions.get("network_allowed") is False:
+            return False
+        if mutation_class == "writes_files" and restrictions.get("write_allowed") is False:
+            return False
+        matching_authorizations.append(authorization)
+    if not matching_authorizations:
+        return False
+    ledgers = governor.get("tool_ledgers")
+    if not isinstance(ledgers, list):
+        return False
+    authorized_decision_ids = {
+        str(authorization.get("decision_id") or "") for authorization in matching_authorizations
+    }
+    for ledger in ledgers:
+        if not isinstance(ledger, dict):
+            continue
+        if ledger.get("schema_version") != "tool-call-ledger-v1":
+            continue
+        if ledger.get("tool_name") != tool_name:
+            continue
+        if ledger.get("capability_id") != capability_id:
+            continue
+        if str(ledger.get("action_id") or "") not in action_ids:
+            continue
+        ledger_authorization = ledger.get("authorization")
+        if not isinstance(ledger_authorization, dict):
+            continue
+        if str(ledger_authorization.get("decision_id") or "") not in authorized_decision_ids:
+            continue
+        if ledger_authorization.get("verdict") != "allow":
+            continue
         return True
     return False
 
 
-def _require_voice_vnext_authority(
+def _require_voice_governor_authority(
     payload: dict[str, Any],
     *,
     tool_name: str,
     mutation_class: str,
     external_network: bool = False,
 ) -> None:
-    if not _authorize_vnext_tool_call_for_voice(
+    if not _voice_governor_allows_tool_call(
         payload,
         tool_name=tool_name,
         mutation_class=mutation_class,
         external_network=external_network,
     ):
-        raise ValueError(f"{tool_name} requires TurnIntentEnvelopeVNext authority.")
+        raise ValueError(f"{tool_name} requires Harness Core Governor authority.")
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -333,7 +408,7 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
     target = str(payload.get("target") or payload.get("provider") or "").strip().lower()
     if not target:
         raise ValueError("voice.install requires an explicit `target`: `kokoro`, `faster-whisper`, or `local`.")
-    _require_voice_vnext_authority(payload, tool_name="voice.install", mutation_class="writes_files")
+    _require_voice_governor_authority(payload, tool_name="voice.install", mutation_class="writes_files")
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
@@ -804,7 +879,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         LOCAL_TTS_PROVIDER,
         LOCAL_MACOS_TTS_PROVIDER,
     }
-    _require_voice_vnext_authority(
+    _require_voice_governor_authority(
         payload,
         tool_name="voice.speak",
         mutation_class="external_network",
@@ -876,7 +951,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     fallback_mode = _resolve_fallback_mode(payload)
     transcription_mode = _transcription_provider_mode(payload)
     external_network = transcription_mode not in {"auto", "local"}
-    _require_voice_vnext_authority(
+    _require_voice_governor_authority(
         payload,
         tool_name="voice.transcribe",
         mutation_class="external_network",

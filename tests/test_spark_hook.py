@@ -45,6 +45,7 @@ class _FakeBinaryHttpResponse:
 def _payload(tmp_path, **overrides):
     env_file = tmp_path / ".env"
     env_file.write_text(f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\n", encoding="utf-8")
+    authority = _voice_authority_payload()
     payload = {
         "builder_env_file_path": str(env_file),
         "provider": {
@@ -54,10 +55,18 @@ def _payload(tmp_path, **overrides):
             "base_url": "https://api.openai.com/v1",
             "secret_env_ref": "OPENAI_API_KEY",
         },
-        "turn_intent_envelope_vnext": _voice_policy(),
+        **authority,
     }
     payload.update(overrides)
     return payload
+
+
+def _voice_authority_payload():
+    envelope = _voice_policy()
+    return {
+        "turn_intent_envelope_vnext": envelope,
+        "governor_decision": _voice_governor_decision(envelope),
+    }
 
 
 def _voice_policy():
@@ -130,6 +139,108 @@ def _voice_policy():
                 "requires_confirmation": False,
             },
         ],
+    }
+
+
+def _voice_governor_decision(envelope):
+    authorizations = []
+    ledgers = []
+    now = "2026-06-02T00:00:00Z"
+    for action in envelope["proposed_actions"]:
+        decision_id = f"decision:{action['action_id'].split(':', 1)[1]}"
+        authorization = {
+            "schema_version": "authorization-decision-v1",
+            "decision_id": decision_id,
+            "created_at": now,
+            "turn_id": envelope["turn_id"],
+            "action_id": action["action_id"],
+            "capability_id": action["capability_id"],
+            "verdict": "allow",
+            "risk_tier": action["risk_tier"],
+            "reasons": ["harness_core_authorized", "voice_governor_fixture"],
+            "evidence": [
+                {
+                    "id": "evidence:voice-test",
+                    "kind": "test_fixture",
+                    "summary": "Voice Governor fixture.",
+                    "redaction_class": "metadata_only",
+                }
+            ],
+            "approval": {"required": False, "status": "not_required"},
+            "restrictions": {
+                "network_allowed": action["action_type"] == "external_api_call",
+                "write_allowed": action["action_type"] != "read",
+                "publish_allowed": False,
+            },
+            "trace": {
+                "id": f"trace:{action['action_id'].split(':', 1)[1]}",
+                "summary": "Voice authorization trace.",
+                "redaction_class": "metadata_only",
+            },
+        }
+        authorizations.append(authorization)
+        ledgers.append(
+            {
+                "schema_version": "tool-call-ledger-v1",
+                "ledger_id": f"ledger:{action['action_id'].split(':', 1)[1]}",
+                "created_at": now,
+                "turn_id": envelope["turn_id"],
+                "action_id": action["action_id"],
+                "capability_id": action["capability_id"],
+                "tool_name": action["capability_id"].rsplit(":", 1)[-1],
+                "lifecycle": [
+                    {"stage": "propose", "at": now, "verdict": "passed", "summary": "Action proposed."},
+                    {"stage": "validate", "at": now, "verdict": "passed", "summary": "Arguments validated."},
+                    {"stage": "authorize", "at": now, "verdict": "passed", "summary": "Governor authorized."},
+                    {"stage": "execute", "at": now, "verdict": "pending", "summary": "Execution pending."},
+                ],
+                "authorization": authorization,
+                "arguments": {
+                    "schema_valid": True,
+                    "raw_ref": action["args_ref"],
+                    "sanitized_ref": action["args_ref"],
+                },
+                "result": {
+                    "status": "not_started",
+                    "summary": "Voice execution has not started.",
+                    "sanitized_output_ref": action["args_ref"],
+                },
+                "trace": authorization["trace"],
+            }
+        )
+    return {
+        "schema_version": "governor-decision-v1",
+        "decision_id": "governor-decision:voice-test",
+        "created_at": now,
+        "surface": "telegram",
+        "turn_id": envelope["turn_id"],
+        "selected_move": "execute_action",
+        "authority_state": "executable",
+        "risk_tier": "medium",
+        "outcome": "execute",
+        "envelope": envelope,
+        "authorizations": authorizations,
+        "tool_ledgers": ledgers,
+        "execution_boundary": {
+            "action_authorized": True,
+            "action_count": len(envelope["proposed_actions"]),
+            "authorized_action_count": len(authorizations),
+            "requires_human_confirmation": False,
+            "legacy_authority_demoted": True,
+            "reasons": ["harness_core_authorized"],
+        },
+        "reply_contract": {
+            "style": "human_conversational",
+            "instruction": "Execute the authorized voice action.",
+            "inspect_link_allowed": True,
+            "should_interrupt": False,
+        },
+        "evidence": authorizations[0]["evidence"],
+        "trace": {
+            "id": "trace:voice-governor-test",
+            "summary": "Voice Governor decision trace.",
+            "redaction_class": "metadata_only",
+        },
     }
 
 
@@ -401,7 +512,7 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
-        result = handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+        result = handle_voice_install_hook({"target": "kokoro", **_voice_authority_payload()})
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -428,15 +539,23 @@ def test_voice_install_requires_explicit_target():
     run.assert_not_called()
 
 
-def test_voice_install_requires_turn_intent_vnext_authority():
+def test_voice_install_requires_governor_authority():
     with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
-        with pytest.raises(ValueError, match="TurnIntentEnvelopeVNext"):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
             handle_voice_install_hook({"target": "kokoro"})
 
     run.assert_not_called()
 
 
-def test_voice_transcribe_requires_turn_intent_vnext_authority(tmp_path):
+def test_voice_install_rejects_vnext_without_governor_authority():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+
+    run.assert_not_called()
+
+
+def test_voice_transcribe_requires_governor_authority(tmp_path):
     payload = {
         "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
         "filename": "telegram-voice.ogg",
@@ -445,15 +564,15 @@ def test_voice_transcribe_requires_turn_intent_vnext_authority(tmp_path):
     }
     with patch(
         "voice_comms_chip.spark_hook._local_faster_whisper_available",
-        side_effect=AssertionError("transcription should not run without VNext authority"),
+        side_effect=AssertionError("transcription should not run without Governor authority"),
     ):
-        with pytest.raises(ValueError, match="TurnIntentEnvelopeVNext"):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
             handle_voice_transcribe_hook(payload)
 
 
-def test_voice_speak_requires_turn_intent_vnext_authority():
-    with patch.dict(sys.modules, {"pyttsx3": SimpleNamespace(init=AssertionError("tts should not run without VNext authority"))}):
-        with pytest.raises(ValueError, match="TurnIntentEnvelopeVNext"):
+def test_voice_speak_requires_governor_authority():
+    with patch.dict(sys.modules, {"pyttsx3": SimpleNamespace(init=AssertionError("tts should not run without Governor authority"))}):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
             handle_voice_speak_hook(
                 {
                     "text": "Local free voice.",
@@ -469,7 +588,7 @@ def test_voice_install_kokoro_skips_pip_when_already_installed():
     ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
-        result = handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+        result = handle_voice_install_hook({"target": "kokoro", **_voice_authority_payload()})
 
     assert result["returncode"] == 0
     assert result["stdout"] == "already_installed"
@@ -497,7 +616,7 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
-        result = handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+        result = handle_voice_install_hook({"target": "kokoro", **_voice_authority_payload()})
 
     assert result["returncode"] == 0
     assert result["result"]["kokoro_ready"] is True
@@ -522,7 +641,7 @@ def test_voice_install_faster_whisper_runs_local_pip_when_missing():
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
-        result = handle_voice_install_hook({"target": "faster-whisper", "turn_intent_envelope_vnext": _voice_policy()})
+        result = handle_voice_install_hook({"target": "faster-whisper", **_voice_authority_payload()})
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -550,7 +669,7 @@ def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
-        result = handle_voice_install_hook({"target": "local", "turn_intent_envelope_vnext": _voice_policy()})
+        result = handle_voice_install_hook({"target": "local", **_voice_authority_payload()})
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -931,7 +1050,7 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
                 "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
                 "filename": "telegram-voice.ogg",
                 "mime_type": "audio/ogg",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
             }
         )
 
@@ -973,7 +1092,7 @@ def test_voice_speak_uses_profile_default_elevenlabs_voice(tmp_path):
             {
                 "builder_env_file_path": str(env_file),
                 "text": "Operator status update.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
             }
         )
 
@@ -1025,7 +1144,7 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
                 "surface": "telegram",
                 "text": "Telegram voice note reply.",
                 "caption_text": "Telegram voice note reply.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
                 "telegram_delivery": {
                     "status": "success",
                     "telegram_message_id": 12345,
@@ -1073,7 +1192,7 @@ def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
         result = handle_voice_speak_hook(
             {
                 "text": "Local free voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
                 "tts": {
                     "provider_id": "pyttsx3",
                     "voice_name": "test",
@@ -1117,7 +1236,7 @@ def test_voice_speak_defaults_to_macos_say_tts_when_no_paid_provider_is_ready():
         result = handle_voice_speak_hook(
             {
                 "text": "macOS local voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
                 "tts": {
                     "voice_name": "Samantha",
                     "rate": 180,
@@ -1167,7 +1286,7 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
         result = handle_voice_speak_hook(
             {
                 "text": "Kokoro local voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
                 "tts": {
                     "provider_id": "kokoro",
                     "model_path": str(model_path),
@@ -1229,7 +1348,7 @@ def test_voice_speak_uses_env_default_tts_provider_for_kokoro(tmp_path):
             {
                 "builder_env_file_path": str(env_file),
                 "text": "Env Kokoro voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
             }
         )
 
@@ -1294,7 +1413,7 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
                 "builder_env_file_path": str(env_file),
                 "surface": "telegram",
                 "text": "Use the new realtime voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
             }
         )
 
@@ -1364,7 +1483,7 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
             {
                 "builder_env_file_path": str(env_file),
                 "text": "Retry the fallback voice.",
-                "turn_intent_envelope_vnext": _voice_policy(),
+                **_voice_authority_payload(),
             }
         )
 
