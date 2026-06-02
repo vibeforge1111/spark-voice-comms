@@ -1762,7 +1762,10 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             raw_message = ws.recv()
             if not raw_message:
                 continue
-            event = json.loads(raw_message)
+            try:
+                event = json.loads(raw_message)
+            except (json.JSONDecodeError, ValueError):
+                continue
             event_type = str(event.get("type") or "")
             if event_type == "error":
                 error = event.get("error") if isinstance(event.get("error"), dict) else {}
