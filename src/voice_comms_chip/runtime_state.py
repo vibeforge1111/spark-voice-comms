@@ -69,7 +69,7 @@ def state_from_status(
         },
         tts={
             "provider_id": tts_provider_id,
-            "mode": "local" if tts_provider_id in {"kokoro", "pyttsx3", "local"} else "hosted",
+            "mode": "local" if tts_provider_id in {"kokoro", "pyttsx3", "macos-say", "local"} else "hosted",
             "ready": tts_ready,
             "voice_name": profile_summary.get("profile_name"),
             "voice_id": status.get("tts_voice_id"),
@@ -106,7 +106,7 @@ def state_from_speak(
         },
         tts={
             "provider_id": request.get("provider_id") or "none",
-            "mode": "local" if request.get("provider_id") in {"kokoro", "pyttsx3"} else "hosted",
+            "mode": "local" if request.get("provider_id") in {"kokoro", "pyttsx3", "macos-say"} else "hosted",
             "ready": bool(audio_bytes),
             "voice_name": request.get("preferred_voice_name") or profile_summary.get("profile_name"),
             "voice_id": resolved_voice_id,

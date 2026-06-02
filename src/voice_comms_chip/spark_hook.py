@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,7 @@ DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TTS_PROVIDER = "elevenlabs"
 LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
+LOCAL_MACOS_TTS_PROVIDER = "macos-say"
 OPENAI_REALTIME_TTS_PROVIDER = "openai-realtime"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
@@ -69,6 +71,8 @@ ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFO
 ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
+ENV_SPARK_HOME = "SPARK_HOME"
+VOICE_RUNTIME_STATE_RELATIVE_PATH = Path("state") / "spark-voice-comms" / "voice-runtime-state.json"
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -102,6 +106,157 @@ VOICE_ENV_KEYS = {
     ENV_OPENAI_REALTIME_INSTRUCTIONS,
     ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
 }
+
+
+def _voice_turn_intent_vnext(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in (
+        "turn_intent_envelope_vnext",
+        "turnIntentEnvelopeVNext",
+        "spark_turn_intent_vnext",
+        "sparkTurnIntentVNext",
+        "turn_intent_payload",
+    ):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and candidate.get("schema_version") == "turn-intent-envelope-vnext":
+            return candidate
+    return {}
+
+
+def _voice_governor_decision(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in (
+        "governor_decision",
+        "governorDecision",
+        "harness_core_governor_decision",
+        "harnessCoreGovernorDecision",
+        "spark_governor_decision",
+        "sparkGovernorDecision",
+        "authority",
+    ):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and candidate.get("schema_version") == "governor-decision-v1":
+            return candidate
+    return {}
+
+
+def _voice_action_type_for_mutation(mutation_class: str) -> str:
+    if mutation_class == "read_only":
+        return "read"
+    if mutation_class == "writes_files":
+        return "edit_file"
+    if mutation_class == "external_network":
+        return "external_api_call"
+    return "read"
+
+
+def _voice_governor_allows_tool_call(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    mutation_class: str,
+    external_network: bool = False,
+) -> bool:
+    governor = _voice_governor_decision(payload)
+    if not governor:
+        return False
+    if governor.get("outcome") != "execute":
+        return False
+    execution_boundary = governor.get("execution_boundary")
+    if not isinstance(execution_boundary, dict) or not execution_boundary.get("action_authorized"):
+        return False
+    envelope = governor.get("envelope")
+    if not isinstance(envelope, dict) or envelope.get("schema_version") != "turn-intent-envelope-vnext":
+        return False
+    authority = envelope.get("action_authority")
+    if not isinstance(authority, dict):
+        return False
+    if envelope.get("selected_move") != "execute_action" or authority.get("state") != "executable":
+        return False
+    proposed_actions = envelope.get("proposed_actions")
+    if not isinstance(proposed_actions, list):
+        return False
+    capability_id = f"capability:spark-voice-comms:{tool_name}"
+    action_type = _voice_action_type_for_mutation(mutation_class)
+    matching_actions = []
+    for action in proposed_actions:
+        if not isinstance(action, dict):
+            continue
+        if action.get("capability_id") != capability_id:
+            continue
+        if action.get("action_type") != action_type:
+            continue
+        if external_network and action.get("action_type") != "external_api_call":
+            continue
+        matching_actions.append(action)
+    if not matching_actions:
+        return False
+    action_ids = {str(action.get("action_id") or "") for action in matching_actions}
+    authorizations = governor.get("authorizations")
+    if not isinstance(authorizations, list):
+        return False
+    matching_authorizations = []
+    for authorization in authorizations:
+        if not isinstance(authorization, dict):
+            continue
+        if authorization.get("schema_version") != "authorization-decision-v1":
+            continue
+        if authorization.get("verdict") != "allow":
+            continue
+        if authorization.get("capability_id") != capability_id:
+            continue
+        if str(authorization.get("action_id") or "") not in action_ids:
+            continue
+        restrictions = authorization.get("restrictions")
+        if not isinstance(restrictions, dict):
+            return False
+        if external_network and restrictions.get("network_allowed") is False:
+            return False
+        if mutation_class == "writes_files" and restrictions.get("write_allowed") is False:
+            return False
+        matching_authorizations.append(authorization)
+    if not matching_authorizations:
+        return False
+    ledgers = governor.get("tool_ledgers")
+    if not isinstance(ledgers, list):
+        return False
+    authorized_decision_ids = {
+        str(authorization.get("decision_id") or "") for authorization in matching_authorizations
+    }
+    for ledger in ledgers:
+        if not isinstance(ledger, dict):
+            continue
+        if ledger.get("schema_version") != "tool-call-ledger-v1":
+            continue
+        if ledger.get("tool_name") != tool_name:
+            continue
+        if ledger.get("capability_id") != capability_id:
+            continue
+        if str(ledger.get("action_id") or "") not in action_ids:
+            continue
+        ledger_authorization = ledger.get("authorization")
+        if not isinstance(ledger_authorization, dict):
+            continue
+        if str(ledger_authorization.get("decision_id") or "") not in authorized_decision_ids:
+            continue
+        if ledger_authorization.get("verdict") != "allow":
+            continue
+        return True
+    return False
+
+
+def _require_voice_governor_authority(
+    payload: dict[str, Any],
+    *,
+    tool_name: str,
+    mutation_class: str,
+    external_network: bool = False,
+) -> None:
+    if not _voice_governor_allows_tool_call(
+        payload,
+        tool_name=tool_name,
+        mutation_class=mutation_class,
+        external_network=external_network,
+    ):
+        raise ValueError(f"{tool_name} requires Harness Core Governor authority.")
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -253,7 +408,10 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
+    target = str(payload.get("target") or payload.get("provider") or "").strip().lower()
+    if not target:
+        raise ValueError("voice.install requires an explicit `target`: `kokoro`, `faster-whisper`, or `local`.")
+    _require_voice_governor_authority(payload, tool_name="voice.install", mutation_class="writes_files")
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
@@ -719,11 +877,24 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
+    external_network = request["provider_id"] not in {
+        LOCAL_KOKORO_TTS_PROVIDER,
+        LOCAL_TTS_PROVIDER,
+        LOCAL_MACOS_TTS_PROVIDER,
+    }
+    _require_voice_governor_authority(
+        payload,
+        tool_name="voice.speak",
+        mutation_class="external_network",
+        external_network=external_network,
+    )
     synthesize_started = time.perf_counter()
     if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
     elif request["provider_id"] == LOCAL_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
+    elif request["provider_id"] == LOCAL_MACOS_TTS_PROVIDER:
+        audio_bytes, resolved_voice_id = _synthesize_with_macos_say(request=request)
     elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
     else:
@@ -782,6 +953,13 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
     fallback_mode = _resolve_fallback_mode(payload)
     transcription_mode = _transcription_provider_mode(payload)
+    external_network = transcription_mode not in {"auto", "local"}
+    _require_voice_governor_authority(
+        payload,
+        tool_name="voice.transcribe",
+        mutation_class="external_network",
+        external_network=external_network,
+    )
     if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
         try:
             transcript_text = _transcribe_with_local_faster_whisper(
@@ -1061,6 +1239,12 @@ def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
             "provider": LOCAL_TTS_PROVIDER,
             "status": "ready via pyttsx3 basic system TTS",
         }
+    if _local_macos_say_available():
+        return {
+            "ready": True,
+            "provider": LOCAL_MACOS_TTS_PROVIDER,
+            "status": "ready via macOS say local system TTS",
+        }
     return {
         "ready": False,
         "provider": "none",
@@ -1093,7 +1277,7 @@ def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
 def _active_tts_status(*, env_map: dict[str, str], local_tts_status: dict[str, Any]) -> dict[str, Any]:
     selected_provider = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower()
     paid_tts_status = _paid_tts_status(env_map=env_map)
-    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "local"}:
+    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "macos-say", "say", "macos", "local"}:
         return local_tts_status
     if selected_provider in {"elevenlabs", *OPENAI_REALTIME_PROVIDER_ALIASES}:
         return paid_tts_status
@@ -1353,6 +1537,10 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
             "fallback_reason": reason,
+            "routable": False,
+            "route_to_builder": False,
+            "diagnostic_only": True,
+            "transcript_source": "diagnostic_fallback",
         },
     }
 
@@ -1409,11 +1597,15 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     tts = tts_payload if isinstance(tts_payload, dict) else {}
     surface = str(payload.get("surface") or "").strip().lower()
     env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
+    provider_id = str(
+        tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or _default_tts_provider_id(env_map=env_map)
+    ).strip().lower() or DEFAULT_TTS_PROVIDER
     if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
         return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
         return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
+    if provider_id in {LOCAL_MACOS_TTS_PROVIDER, "say", "macos"}:
+        return _resolve_macos_say_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
         return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
@@ -1464,6 +1656,19 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
             "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
         },
     }
+
+
+def _default_tts_provider_id(*, env_map: dict[str, str]) -> str:
+    paid_tts_status = _paid_tts_status(env_map=env_map)
+    if paid_tts_status.get("ready"):
+        return str(paid_tts_status.get("provider") or DEFAULT_TTS_PROVIDER)
+    if _local_kokoro_ready(env_map=env_map):
+        return LOCAL_KOKORO_TTS_PROVIDER
+    if _local_pyttsx3_available():
+        return LOCAL_TTS_PROVIDER
+    if _local_macos_say_available():
+        return LOCAL_MACOS_TTS_PROVIDER
+    return DEFAULT_TTS_PROVIDER
 
 
 def _resolve_kokoro_tts_request(
@@ -1522,6 +1727,29 @@ def _resolve_local_tts_request(
         "voice_compatible": False,
         "rate": rate,
         "volume": volume,
+        "voice_name": voice_name,
+    }
+
+
+def _resolve_macos_say_tts_request(
+    *,
+    tts: dict[str, Any],
+    env_map: dict[str, str],
+    text: str,
+    surface: str,
+) -> dict[str, Any]:
+    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
+    voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
+    return {
+        "provider_id": LOCAL_MACOS_TTS_PROVIDER,
+        "surface": surface,
+        "text": text,
+        "voice_id": voice_name or "macos-system-voice",
+        "model_id": "macos-say",
+        "mime_type": "audio/wav",
+        "file_extension": ".wav",
+        "voice_compatible": False,
+        "rate": rate,
         "voice_name": voice_name,
     }
 
@@ -1668,6 +1896,56 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
         return audio_bytes, str(request.get("voice_id") or "local-system-voice")
     finally:
         if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def _synthesize_with_macos_say(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    say_path = shutil.which("say")
+    afconvert_path = shutil.which("afconvert")
+    if not say_path or not afconvert_path:
+        raise RuntimeError("macOS say TTS requires local `say` and `afconvert` binaries.")
+    temp_paths: list[str] = []
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as text_file:
+            text_file.write(str(request["text"]))
+            text_path = text_file.name
+        temp_paths.append(text_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".aiff") as aiff_file:
+            aiff_path = aiff_file.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as wav_file:
+            wav_path = wav_file.name
+        temp_paths.extend([aiff_path, wav_path])
+
+        say_command = [say_path, "-o", aiff_path]
+        voice_name = str(request.get("voice_name") or "").strip()
+        if voice_name:
+            say_command.extend(["-v", voice_name])
+        rate = request.get("rate")
+        if rate is not None:
+            say_command.extend(["-r", str(int(float(rate)))])
+        say_command.extend(["-f", text_path])
+        subprocess.run(say_command, check=True, capture_output=True, text=True, timeout=30)
+        subprocess.run(
+            [afconvert_path, "-f", "WAVE", "-d", "LEI16", aiff_path, wav_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        audio_bytes = Path(wav_path).read_bytes()
+        if not audio_bytes:
+            raise RuntimeError("macOS say TTS returned empty audio.")
+        return audio_bytes, str(request.get("voice_id") or "macos-system-voice")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"macOS say TTS failed: {detail}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("macOS say TTS timed out.") from exc
+    finally:
+        for temp_path in temp_paths:
             try:
                 os.unlink(temp_path)
             except OSError:
@@ -1872,7 +2150,7 @@ def _build_deterministic_fallback_transcript(
     approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
     snippets = [
         "Ready when you are.",
-        "Holding for your next command.",
+        "Holding for a fresh voice note.",
         "Signal received and queued.",
         "Spark fallback captured your audio.",
         "Mic packet decoded locally.",
@@ -1892,6 +2170,10 @@ def _local_faster_whisper_available() -> bool:
 
 def _local_pyttsx3_available() -> bool:
     return importlib.util.find_spec("pyttsx3") is not None
+
+
+def _local_macos_say_available() -> bool:
+    return bool(shutil.which("say") and shutil.which("afconvert"))
 
 
 def _local_kokoro_package_available() -> bool:
@@ -2157,10 +2439,13 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
         },
         "telegram_delivery": {
             "ready": bool(delivery.get("ready")),
+            "last_send_voice_at": delivery.get("last_send_voice_at"),
             "last_send_voice_at_present": bool(delivery.get("last_send_voice_at")),
             "last_send_voice_status": delivery.get("last_send_voice_status"),
             "last_failure_reason_present": bool(delivery.get("last_failure_reason")),
             "telegram_message_id_present": bool(delivery.get("telegram_message_id_present")),
+            "send_method": delivery.get("send_method"),
+            "native_voice_message_ready": bool(delivery.get("native_voice_message_ready")),
         },
         "latency": runtime_state.get("latency") if isinstance(runtime_state.get("latency"), dict) else {},
         "claim_levels": runtime_state.get("claim_levels") if isinstance(runtime_state.get("claim_levels"), dict) else {},
@@ -2169,15 +2454,105 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
+def default_voice_runtime_state_path() -> Path:
+    spark_home = Path(os.environ.get(ENV_SPARK_HOME, Path.home() / ".spark")).expanduser()
+    return spark_home / VOICE_RUNTIME_STATE_RELATIVE_PATH
+
+
+def _configured_runtime_state_path() -> Path | None:
     path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
     if not path_text:
-        return
+        return None
+    return Path(path_text).expanduser()
+
+
+def _runtime_state_from_hook_result(result: dict[str, Any]) -> dict[str, Any] | None:
     result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
     runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
+    return runtime_state
+
+
+def _runtime_state_with_preserved_delivery(public_state: dict[str, Any], target: Path) -> dict[str, Any]:
+    delivery = public_state.get("telegram_delivery") if isinstance(public_state.get("telegram_delivery"), dict) else {}
+    if delivery.get("ready"):
+        return public_state
+    try:
+        existing = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return public_state
+    if existing.get("schema_version") != "spark.voice_runtime_state.v1":
+        return public_state
+    existing_delivery = existing.get("telegram_delivery") if isinstance(existing.get("telegram_delivery"), dict) else {}
+    existing_status = str(existing_delivery.get("last_send_voice_status") or existing_delivery.get("status") or "")
+    if not (existing_delivery.get("ready") is True or existing_status in {"success", "document_fallback"}):
+        return public_state
+
+    merged = json.loads(json.dumps(public_state))
+    merged["telegram_delivery"] = {
+        "ready": True,
+        "last_send_voice_at": existing_delivery.get("last_send_voice_at"),
+        "last_send_voice_at_present": bool(
+            existing_delivery.get("last_send_voice_at") or existing_delivery.get("last_send_voice_at_present")
+        ),
+        "last_send_voice_status": existing_status or "success",
+        "last_failure_reason_present": bool(
+            existing_delivery.get("last_failure_reason") or existing_delivery.get("last_failure_reason_present")
+        ),
+        "telegram_message_id_present": bool(
+            existing_delivery.get("telegram_message_id_present") or existing_delivery.get("telegram_message_id")
+        ),
+        "send_method": existing_delivery.get("send_method"),
+        "native_voice_message_ready": bool(existing_delivery.get("native_voice_message_ready")),
+    }
+    latency = merged.get("latency") if isinstance(merged.get("latency"), dict) else {}
+    existing_latency = existing.get("latency") if isinstance(existing.get("latency"), dict) else {}
+    for key in ("send_voice_ms", "total_ms"):
+        if not latency.get(key) and existing_latency.get(key):
+            latency[key] = existing_latency[key]
+    merged["latency"] = latency
+    claims = merged.get("claim_levels") if isinstance(merged.get("claim_levels"), dict) else {}
+    claims["delivery_ready"] = True
+    claims["conversation_ready"] = bool(
+        (merged.get("stt") if isinstance(merged.get("stt"), dict) else {}).get("ready")
+        and (merged.get("tts") if isinstance(merged.get("tts"), dict) else {}).get("ready")
+    )
+    merged["claim_levels"] = claims
+    existing_sources = existing.get("source_ledger") if isinstance(existing.get("source_ledger"), list) else []
+    merged_sources = merged.get("source_ledger") if isinstance(merged.get("source_ledger"), list) else []
+    merged["source_ledger"] = list(dict.fromkeys([*merged_sources, *existing_sources]))
+    return merged
+
+
+def export_voice_runtime_state_for_spark_os(
+    payload: dict[str, Any] | None = None,
+    *,
+    output_path: Path | str | None = None,
+) -> dict[str, Any]:
+    status_payload = {"surface": "spark_os_healthcheck"}
+    if payload:
+        status_payload.update(payload)
+    result = handle_voice_status_hook(status_payload)
+    runtime_state = _runtime_state_from_hook_result(result)
+    if runtime_state is None:
+        raise RuntimeError("voice.status did not produce runtime_state")
+    target = (
+        Path(output_path).expanduser()
+        if output_path is not None
+        else (_configured_runtime_state_path() or default_voice_runtime_state_path())
+    )
+    public_state = _runtime_state_with_preserved_delivery(_public_runtime_state(runtime_state), target)
+    _write_output(target, public_state)
+    return {"path": str(target), "runtime_state": public_state}
+
+
+def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
+    path = _configured_runtime_state_path()
+    if path is None:
+        return
+    runtime_state = _runtime_state_from_hook_result(result)
     if runtime_state is None:
         return
-    _write_output(Path(path_text).expanduser(), _public_runtime_state(runtime_state))
+    _write_output(path, _runtime_state_with_preserved_delivery(_public_runtime_state(runtime_state), path))
 
 
 def main() -> int:

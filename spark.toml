@@ -43,7 +43,7 @@ storage = "keychain"
 env_var = "ELEVENLABS_API_KEY"
 
 [healthcheck]
-command = "python -c \"from voice_comms_chip.runtime_state import build_voice_runtime_state; build_voice_runtime_state(); print('spark-voice-comms importable')\""
+command = "python -c \"from voice_comms_chip.spark_hook import export_voice_runtime_state_for_spark_os; export_voice_runtime_state_for_spark_os(); print('spark-voice-comms importable')\""
 timeout_seconds = 20
 success_hint = "Spark Voice Comms hooks are importable."
 failure_hint = "Run `python -m pytest -q` in the spark-voice-comms module home for detail."
