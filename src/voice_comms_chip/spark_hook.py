@@ -925,7 +925,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
                 provider_note = (
                     "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
                 )
-        except Exception as exc:
+        except ValueError as exc:
             provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
         return {
             "ready": True,
@@ -946,7 +946,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         }
     try:
         provider = _resolve_provider(payload)
-    except Exception as exc:
+    except ValueError as exc:
         return {
             "ready": False,
             "local_ready": False,

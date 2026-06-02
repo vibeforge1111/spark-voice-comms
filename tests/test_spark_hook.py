@@ -1250,3 +1250,68 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+def test_voice_status_lets_resolve_provider_attribute_error_surface(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=fake\n", encoding="utf-8")
+    payload = {
+        "builder_env_file_path": str(env_file),
+        "provider": {
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "auth_method": "api_key_env",
+            "base_url": "https://api.openai.com/v1",
+            "secret_env_ref": "OPENAI_API_KEY",
+        },
+    }
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._resolve_provider",
+        side_effect=AttributeError("simulated programming bug"),
+    ):
+        with pytest.raises(AttributeError, match="simulated programming bug"):
+            handle_voice_status_hook(payload)
+
+
+def test_voice_status_lets_resolve_provider_value_error_become_note(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=fake\n", encoding="utf-8")
+    payload = {
+        "builder_env_file_path": str(env_file),
+        "provider": {
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "auth_method": "api_key_env",
+            "base_url": "https://api.openai.com/v1",
+            "secret_env_ref": "OPENAI_API_KEY",
+        },
+    }
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._resolve_provider",
+        side_effect=ValueError("Active provider 'openai' has no base URL configured."),
+    ):
+        result = handle_voice_status_hook(payload)
+    assert result["returncode"] == 0
+    note = result["result"].get("provider_note") or result["result"].get("reason", "")
+    assert "no base URL configured" in note or "no base URL configured" in str(result["result"])
+
+
+def test_voice_status_hosted_only_lets_resolve_provider_attribute_error_surface(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("VOICE_TRANSCRIBE_PROVIDER=openai\nOPENAI_API_KEY=fake\n", encoding="utf-8")
+    payload = {
+        "builder_env_file_path": str(env_file),
+        "provider": {
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "auth_method": "api_key_env",
+            "base_url": "https://api.openai.com/v1",
+            "secret_env_ref": "OPENAI_API_KEY",
+        },
+    }
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._resolve_provider",
+        side_effect=AttributeError("simulated programming bug in hosted-only path"),
+    ):
+        with pytest.raises(AttributeError, match="simulated programming bug"):
+            handle_voice_status_hook(payload)
