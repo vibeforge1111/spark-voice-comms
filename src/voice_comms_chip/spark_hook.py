@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import importlib
 import importlib.util
@@ -69,6 +70,9 @@ ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFO
 ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
+MAX_HOOK_INPUT_BYTES = 1_000_000
+MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
+MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -102,6 +106,12 @@ VOICE_ENV_KEYS = {
     ENV_OPENAI_REALTIME_INSTRUCTIONS,
     ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
 }
+
+
+class _PublicHookInputError(ValueError):
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -268,8 +278,28 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
     target = LOCAL_KOKORO_TTS_PROVIDER
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime.")
+    if _kokoro_python_unsupported_message():
+        return {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Kokoro install is not supported in this Python runtime.",
+            "error": "Kokoro install is not supported in this Python runtime.",
+            "error_code": "voice_install_unsupported_runtime",
+            "metrics": {"installed": 0, "already_installed": 0},
+            "result": {
+                "reply_text": (
+                    "Kokoro install cannot run in this Python runtime.\n"
+                    "Next: run Spark voice install from a Python 3.10-3.13 runtime, then retry `/voice install kokoro`."
+                ),
+                "target": target,
+                "python": _python_runtime_label(),
+                "installed": False,
+                "already_installed": False,
+                "kokoro_ready": False,
+                "pip_tail": [],
+                "error_code": "voice_install_unsupported_runtime",
+            },
+        }
     was_ready = _local_kokoro_package_available()
     if was_ready:
         install_status = "already_installed"
@@ -777,7 +807,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     audio_base64 = str(payload.get("audio_base64") or "").strip()
     if not audio_base64:
         raise ValueError("voice.transcribe requires audio_base64.")
-    audio_bytes = base64.b64decode(audio_base64.encode("ascii"))
+    audio_bytes = _decode_transcribe_audio_base64(audio_base64)
     filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
     fallback_mode = _resolve_fallback_mode(payload)
@@ -878,6 +908,33 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "mode": "provider",
         },
     }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
+
+
+def _decode_transcribe_audio_base64(audio_base64: str) -> bytes:
+    max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+    if len(audio_base64) > max_base64_chars:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_too_large",
+            "voice.transcribe audio_base64 is too large.",
+        )
+    try:
+        audio_bytes = base64.b64decode(audio_base64.encode("ascii"), validate=True)
+    except (binascii.Error, UnicodeEncodeError) as exc:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_invalid_base64",
+            "voice.transcribe audio_base64 must be valid base64 audio bytes.",
+        ) from exc
+    if not audio_bytes:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_empty",
+            "voice.transcribe audio_base64 decoded to empty audio bytes.",
+        )
+    if len(audio_bytes) > MAX_TRANSCRIBE_AUDIO_BYTES:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_too_large",
+            "voice.transcribe audio_base64 decoded audio is too large.",
+        )
+    return audio_bytes
 
 
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1319,6 +1376,16 @@ def _runtime_env_map(*, env_file_path: str | None = None) -> dict[str, str]:
 def _tail_nonempty_lines(text: str, *, limit: int) -> list[str]:
     lines = [" ".join(line.strip().split()) for line in str(text or "").splitlines()]
     return [line for line in lines if line][-limit:]
+
+
+def _kokoro_python_unsupported_message() -> str | None:
+    if sys.version_info >= (3, 14):
+        return "kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime."
+    return None
+
+
+def _python_runtime_label() -> str:
+    return f"python {sys.version_info.major}.{sys.version_info.minor}"
 
 
 def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
@@ -2119,6 +2186,51 @@ def _write_output(path: Path, payload: dict[str, Any]) -> None:
                 pass
 
 
+def _hook_input_limit_bytes(hook: str) -> int:
+    if hook == "voice.transcribe":
+        max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+        return max_base64_chars + MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES
+    return MAX_HOOK_INPUT_BYTES
+
+
+def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
+    raw = path.read_bytes()
+    if len(raw) > _hook_input_limit_bytes(hook):
+        raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
+    try:
+        payload = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
+    return payload
+
+
+def _hook_error_payload(exc: Exception) -> dict[str, Any]:
+    error_code = ""
+    if isinstance(exc, _PublicHookInputError):
+        detail = str(exc)
+        error_code = exc.error_code
+    elif isinstance(exc, json.JSONDecodeError):
+        detail = "Voice hook input must be valid JSON."
+        error_code = "voice_hook_invalid_json"
+    else:
+        detail = str(exc)
+    payload: dict[str, Any] = {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": detail,
+        "metrics": {},
+        "result": {},
+        "error": detail,
+    }
+    if error_code:
+        payload["error_code"] = error_code
+        payload["error_type"] = exc.__class__.__name__
+        payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
+    return payload
+
+
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
     stt = runtime_state.get("stt") if isinstance(runtime_state.get("stt"), dict) else {}
     tts = runtime_state.get("tts") if isinstance(runtime_state.get("tts"), dict) else {}
@@ -2191,7 +2303,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
+        payload = _load_hook_payload(Path(args.input), hook=args.hook)
         if args.hook == "voice.status":
             result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
@@ -2205,17 +2317,7 @@ def main() -> int:
         else:
             result = handle_voice_transcribe_hook(payload)
     except Exception as exc:
-        _write_output(
-            Path(args.output),
-            {
-                "returncode": 1,
-                "stdout": "",
-                "stderr": str(exc),
-                "metrics": {},
-                "result": {},
-                "error": str(exc),
-            },
-        )
+        _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
     _export_runtime_state_if_configured(result)
