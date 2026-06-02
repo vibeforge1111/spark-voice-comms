@@ -1109,15 +1109,15 @@ def _build_speak_delivery_trace(
     audio_bytes: bytes,
     runtime_state: dict[str, Any],
 ) -> dict[str, Any]:
-    delivery = runtime_state["telegram_delivery"]
+    delivery = runtime_state.get("telegram_delivery", {})
     status = str(delivery.get("last_send_voice_status") or "unknown")
     failure_stage = "" if status == "success" else "host_delivery"
     if status == "unknown":
         failure_stage = "not_attempted_by_chip"
     return {
         "provider_id": request["provider_id"],
-        "voice_id_masked": runtime_state["tts"]["voice_id_masked"],
-        "voice_id_fingerprint": runtime_state["tts"]["voice_id_fingerprint"],
+        "voice_id_masked": runtime_state.get("tts", {}).get("voice_id_masked", "unknown"),
+        "voice_id_fingerprint": runtime_state.get("tts", {}).get("voice_id_fingerprint", "unknown"),
         "mime_type": request["mime_type"],
         "voice_compatible": bool(request["voice_compatible"]),
         "audio_bytes": len(audio_bytes),
