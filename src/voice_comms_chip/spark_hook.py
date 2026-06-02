@@ -2088,17 +2088,16 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
 
 
 def _join_url(base_url: str, suffix: str) -> str:
-    """Join a base URL and suffix with hostname validation to prevent SSRF."""
-    # Basic validation: reject non-HTTP(S) schemes and empty URLs
-    if not base_url or not isinstance(base_url, str):
+    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty string")
-    if not suffix or not isinstance(suffix, str):
+    if not isinstance(suffix, str) or not suffix.strip():
         raise ValueError("suffix must be a non-empty string")
-    # Only allow http and https schemes
-    lower = base_url.strip().lower()
-    if not (lower.startswith("http://") or lower.startswith("https://")):
-        raise ValueError(f"base_url must use http or https scheme: {base_url[:50]}")
-    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+    clean_base = base_url.strip()
+    parsed = urllib.parse.urlparse(clean_base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base_url must use an http or https URL with a host")
+    return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
