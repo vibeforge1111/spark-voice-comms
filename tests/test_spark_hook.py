@@ -1250,3 +1250,54 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+def test_synthesize_with_pyttsx3_lets_non_import_error_surface():
+    from voice_comms_chip import spark_hook
+
+    def _explode(name):
+        raise RuntimeError("simulated runtime fault from pyttsx3 importer hook")
+
+    with patch.object(spark_hook.importlib, "import_module", side_effect=_explode):
+        with pytest.raises(RuntimeError, match="simulated runtime fault"):
+            spark_hook._synthesize_with_pyttsx3(request={"text": "hi"})
+
+
+def test_synthesize_with_pyttsx3_wraps_real_import_error_as_install_hint():
+    from voice_comms_chip import spark_hook
+
+    def _explode(name):
+        raise ImportError("No module named 'pyttsx3'")
+
+    with patch.object(spark_hook.importlib, "import_module", side_effect=_explode):
+        with pytest.raises(RuntimeError, match="optional package `pyttsx3`"):
+            spark_hook._synthesize_with_pyttsx3(request={"text": "hi"})
+
+
+def test_synthesize_with_kokoro_lets_non_import_error_surface(tmp_path):
+    from voice_comms_chip import spark_hook
+
+    def _explode(name):
+        raise RuntimeError("simulated runtime fault from kokoro importer hook")
+
+    with patch.object(spark_hook.importlib, "import_module", side_effect=_explode):
+        with pytest.raises(RuntimeError, match="simulated runtime fault"):
+            spark_hook._synthesize_with_kokoro(request={"text": "hi"})
+
+
+def test_synthesize_with_openai_realtime_lets_non_import_error_surface():
+    from voice_comms_chip import spark_hook
+
+    def _explode(name):
+        raise RuntimeError("simulated runtime fault from websocket importer hook")
+
+    with patch.object(spark_hook.importlib, "import_module", side_effect=_explode):
+        with pytest.raises(RuntimeError, match="simulated runtime fault"):
+            spark_hook._synthesize_with_openai_realtime(
+                request={
+                    "model_id": "gpt-4o-realtime",
+                    "base_url": "https://api.openai.com/v1",
+                    "secret_value": "fake",
+                    "text": "hi",
+                }
+            )

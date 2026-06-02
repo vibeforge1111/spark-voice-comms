@@ -1639,7 +1639,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
 def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         pyttsx3 = importlib.import_module("pyttsx3")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
     temp_path = None
     try:
@@ -1678,7 +1678,7 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
         soundfile = importlib.import_module("soundfile")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
     model_path = Path(str(request.get("model_path") or ""))
     voices_path = Path(str(request.get("voices_path") or ""))
@@ -1704,7 +1704,7 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
 def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         websocket = importlib.import_module("websocket")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError(
             "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
         ) from exc
