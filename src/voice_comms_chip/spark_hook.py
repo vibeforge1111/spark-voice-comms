@@ -988,7 +988,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
                     "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
                 )
         except ValueError as exc:
-            provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
+            provider_note = "Hosted transcription provider is not configured; local faster-whisper will be used."
         return {
             "ready": True,
             "local_ready": True,
@@ -1066,7 +1066,7 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
-        except Exception as exc:
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
             env_note = f"Builder env file unavailable: {exc}"
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
