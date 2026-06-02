@@ -1254,7 +1254,13 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
     if provider_id or base_url or secret_env_ref:
         resolved_provider_id = provider_id or "openai"
         if resolved_provider_id != "openai":
-            raise ValueError(f"VOICE_TRANSCRIBE_PROVIDER '{resolved_provider_id}' is not supported yet.")
+            raise ValueError(
+                f"VOICE_TRANSCRIBE_PROVIDER {resolved_provider_id!r} is not supported yet. "
+                "Supported values: openai (default hosted), auto, default, "
+                "local, offline, faster-whisper, local-faster-whisper "
+                "(route to local STT), or builder, provider, configured-provider "
+                "(use the builder-payload provider)."
+            )
         resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
