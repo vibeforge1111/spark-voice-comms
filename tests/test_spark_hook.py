@@ -1147,6 +1147,57 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
     assert sent_messages[1]["response"]["input"][0]["content"][0]["text"] == "Use the new realtime voice."
 
 
+def test_voice_speak_reports_malformed_openai_realtime_websocket_message(tmp_path):
+    sent_messages: list[dict[str, object]] = []
+    raw_payload = '{"type":"response.output_audio.delta","delta":"secret-token'
+
+    class FakeRealtimeSocket:
+        def send(self, message: str) -> None:
+            sent_messages.append(json.loads(message))
+
+        def recv(self) -> str:
+            return raw_payload
+
+        def close(self) -> None:
+            return None
+
+    def fake_create_connection(url: str, *, header: list[str], timeout: float):
+        return FakeRealtimeSocket()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TTS_PROVIDER=openai-realtime",
+                "VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2",
+                "VOICE_TTS_OPENAI_REALTIME_VOICE=coral",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with patch.dict(
+        sys.modules,
+        {"websocket": SimpleNamespace(create_connection=fake_create_connection)},
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            handle_voice_speak_hook(
+                {
+                    "builder_env_file_path": str(env_file),
+                    "surface": "telegram",
+                    "text": "Use the new realtime voice.",
+                }
+            )
+
+    message = str(exc_info.value)
+    assert "OpenAI Realtime TTS received malformed websocket message" in message
+    assert "secret-token" not in message
+    assert sent_messages[0]["type"] == "session.update"
+    assert sent_messages[1]["type"] == "response.create"
+
+
 def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(tmp_path):
     calls: list[str] = []
 
