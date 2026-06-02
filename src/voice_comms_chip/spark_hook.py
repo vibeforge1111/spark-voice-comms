@@ -1139,7 +1139,7 @@ def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) 
     caption_fingerprint = _text_fingerprint(caption_text)
     spoken_fingerprint = _text_fingerprint(spoken_text)
     if caption_text:
-        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "not_run"
+        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
     else:
         check = "passed"
     return {
@@ -2072,7 +2072,16 @@ def _join_url(base_url: str, suffix: str) -> str:
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
