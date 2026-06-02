@@ -2406,6 +2406,54 @@ def _runtime_state_from_hook_result(result: dict[str, Any]) -> dict[str, Any] | 
     return runtime_state
 
 
+def _runtime_state_with_preserved_delivery(public_state: dict[str, Any], target: Path) -> dict[str, Any]:
+    delivery = public_state.get("telegram_delivery") if isinstance(public_state.get("telegram_delivery"), dict) else {}
+    if delivery.get("ready"):
+        return public_state
+    try:
+        existing = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return public_state
+    if existing.get("schema_version") != "spark.voice_runtime_state.v1":
+        return public_state
+    existing_delivery = existing.get("telegram_delivery") if isinstance(existing.get("telegram_delivery"), dict) else {}
+    existing_status = str(existing_delivery.get("last_send_voice_status") or existing_delivery.get("status") or "")
+    if not (existing_delivery.get("ready") is True or existing_status == "success"):
+        return public_state
+
+    merged = json.loads(json.dumps(public_state))
+    merged["telegram_delivery"] = {
+        "ready": True,
+        "last_send_voice_at_present": bool(
+            existing_delivery.get("last_send_voice_at") or existing_delivery.get("last_send_voice_at_present")
+        ),
+        "last_send_voice_status": existing_status or "success",
+        "last_failure_reason_present": bool(
+            existing_delivery.get("last_failure_reason") or existing_delivery.get("last_failure_reason_present")
+        ),
+        "telegram_message_id_present": bool(
+            existing_delivery.get("telegram_message_id_present") or existing_delivery.get("telegram_message_id")
+        ),
+    }
+    latency = merged.get("latency") if isinstance(merged.get("latency"), dict) else {}
+    existing_latency = existing.get("latency") if isinstance(existing.get("latency"), dict) else {}
+    for key in ("send_voice_ms", "total_ms"):
+        if not latency.get(key) and existing_latency.get(key):
+            latency[key] = existing_latency[key]
+    merged["latency"] = latency
+    claims = merged.get("claim_levels") if isinstance(merged.get("claim_levels"), dict) else {}
+    claims["delivery_ready"] = True
+    claims["conversation_ready"] = bool(
+        (merged.get("stt") if isinstance(merged.get("stt"), dict) else {}).get("ready")
+        and (merged.get("tts") if isinstance(merged.get("tts"), dict) else {}).get("ready")
+    )
+    merged["claim_levels"] = claims
+    existing_sources = existing.get("source_ledger") if isinstance(existing.get("source_ledger"), list) else []
+    merged_sources = merged.get("source_ledger") if isinstance(merged.get("source_ledger"), list) else []
+    merged["source_ledger"] = list(dict.fromkeys([*merged_sources, *existing_sources]))
+    return merged
+
+
 def export_voice_runtime_state_for_spark_os(
     payload: dict[str, Any] | None = None,
     *,
@@ -2423,7 +2471,7 @@ def export_voice_runtime_state_for_spark_os(
         if output_path is not None
         else (_configured_runtime_state_path() or default_voice_runtime_state_path())
     )
-    public_state = _public_runtime_state(runtime_state)
+    public_state = _runtime_state_with_preserved_delivery(_public_runtime_state(runtime_state), target)
     _write_output(target, public_state)
     return {"path": str(target), "runtime_state": public_state}
 
@@ -2435,7 +2483,7 @@ def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
     runtime_state = _runtime_state_from_hook_result(result)
     if runtime_state is None:
         return
-    _write_output(path, _public_runtime_state(runtime_state))
+    _write_output(path, _runtime_state_with_preserved_delivery(_public_runtime_state(runtime_state), path))
 
 
 def main() -> int:
