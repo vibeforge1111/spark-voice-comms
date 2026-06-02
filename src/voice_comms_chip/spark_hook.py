@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -19,6 +20,8 @@ import wave
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
@@ -501,7 +504,7 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         return _process_voice_env_map()
 
 
@@ -883,7 +886,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except Exception:
+        except (OSError, ValueError):
             pass
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
@@ -1136,7 +1139,7 @@ def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) 
     caption_fingerprint = _text_fingerprint(caption_text)
     spoken_fingerprint = _text_fingerprint(spoken_text)
     if caption_text:
-        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "not_run"
+        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
     else:
         check = "passed"
     return {
@@ -1174,6 +1177,14 @@ def _text_fingerprint(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def _missing_voice_secret_message(context: str) -> str:
+    label = str(context or "Voice provider").strip() or "Voice provider"
+    return (
+        f"{label} is missing a configured API secret. "
+        "Add the required provider key to your builder env file and retry."
+    )
+
+
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     dedicated_provider = _resolve_dedicated_transcription_provider(payload)
     if dedicated_provider is not None:
@@ -1192,7 +1203,10 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if provider_kind not in SUPPORTED_PROVIDER_KINDS:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime.")
+        supported = ", ".join(sorted(SUPPORTED_PROVIDER_KINDS))
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime. Supported provider kinds: {supported}."
+        )
     if execution_transport and execution_transport != "direct_http":
         raise ValueError(
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
@@ -1202,15 +1216,19 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
         )
     if not base_url:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured.")
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no env secret reference configured.")
+        raise ValueError(
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
+        )
     secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
     if not secret_value:
         raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing secret value for env ref '{secret_env_ref}'."
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
     return {
         "provider_id": provider_id,
@@ -1240,9 +1258,7 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
-            raise ValueError(
-                f"Voice transcription is missing secret value for env ref '{resolved_secret_env_ref}'."
-            )
+            raise ValueError(_missing_voice_secret_message("Voice transcription"))
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
@@ -1306,7 +1322,7 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         name, _, value = stripped.partition("=")
-        env_map[name.strip()] = value.strip()
+        env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
     return env_map
 
 
@@ -1397,7 +1413,7 @@ def _transcription_provider_mode(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         env_map = _process_voice_env_map()
     provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
     if not provider_id:
@@ -1435,10 +1451,10 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
     secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for the TTS provider.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     provider_profile = get_provider_voice_profile(profile, "elevenlabs")
     speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
     voice_settings = tts.get("voice_settings")
@@ -1545,10 +1561,10 @@ def _resolve_openai_realtime_tts_request(
 ) -> dict[str, Any]:
     secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for OpenAI Realtime.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
@@ -1780,7 +1796,12 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             raw_message = ws.recv()
             if not raw_message:
                 continue
-            event = json.loads(raw_message)
+            try:
+                event = json.loads(raw_message)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS received malformed websocket message: {exc.msg}"
+                ) from exc
             event_type = str(event.get("type") or "")
             if event_type == "error":
                 error = event.get("error") if isinstance(event.get("error"), dict) else {}
@@ -1843,7 +1864,11 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
+            exc,
+        )
         return None
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list) or not voices:
@@ -1948,7 +1973,8 @@ def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
             try:
                 return max(1, int(configured))
             except ValueError:
-                pass
+                import sys as _sys
+                _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
     return 5
 
 
@@ -2015,6 +2041,11 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _reject_multipart_crlf(label: str, value: str) -> None:
+    if "\r" in value or "\n" in value:
+        raise ValueError(f"{label} must not contain CR or LF characters")
+
+
 def _post_multipart(
     url: str,
     *,
@@ -2025,17 +2056,25 @@ def _post_multipart(
     boundary = f"voice-chip-{uuid4().hex}"
     body = bytearray()
     for key, value in fields.items():
+        _reject_multipart_crlf("multipart field name", str(key))
+        _reject_multipart_crlf("multipart field value", str(value))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
         body.extend(str(value).encode("utf-8"))
         body.extend(b"\r\n")
     for file_info in files:
+        field_name = str(file_info["field_name"])
+        filename = str(file_info["filename"])
+        mime_type = str(file_info["mime_type"])
+        _reject_multipart_crlf("multipart file field name", field_name)
+        _reject_multipart_crlf("multipart filename", filename)
+        _reject_multipart_crlf("multipart content type", mime_type)
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(
             (
-                f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
-                f'filename="{file_info["filename"]}"\r\n'
-                f'Content-Type: {file_info["mime_type"]}\r\n\r\n'
+                f'Content-Disposition: form-data; name="{field_name}"; '
+                f'filename="{filename}"\r\n'
+                f'Content-Type: {mime_type}\r\n\r\n'
             ).encode("utf-8")
         )
         body.extend(bytes(file_info["content"]))
@@ -2080,12 +2119,30 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
 
 
 def _join_url(base_url: str, suffix: str) -> str:
-    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("base_url must be a non-empty string")
+    if not isinstance(suffix, str) or not suffix.strip():
+        raise ValueError("suffix must be a non-empty string")
+    clean_base = base_url.strip()
+    parsed = urllib.parse.urlparse(clean_base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base_url must use an http or https URL with a host")
+    return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
@@ -2159,8 +2216,8 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
     try:
+        payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
         if args.hook == "voice.status":
             result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":

@@ -13,12 +13,16 @@ from unittest.mock import patch
 import pytest
 
 from voice_comms_chip.spark_hook import (
+    _build_speak_coherence,
+    _join_url,
+    _write_output,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
     handle_voice_speak_hook,
     handle_voice_status_hook,
     handle_voice_transcribe_hook,
+    _read_env_map,
     main,
 )
 
@@ -56,6 +60,31 @@ def _payload(tmp_path, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_read_env_map_strips_matching_outer_quotes(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'DOUBLE_QUOTED="double-value"',
+                "SINGLE_QUOTED='single-value'",
+                "UNQUOTED=plain-value",
+                'UNMATCHED="keep-leading-quote',
+                'INNER_QUOTES=prefix"inner"suffix',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert _read_env_map(env_file_path=str(env_file)) == {
+        "DOUBLE_QUOTED": "double-value",
+        "SINGLE_QUOTED": "single-value",
+        "UNQUOTED": "plain-value",
+        "UNMATCHED": '"keep-leading-quote',
+        "INNER_QUOTES": 'prefix"inner"suffix',
+    }
 
 
 def test_voice_status_default_requires_local_faster_whisper(tmp_path):
@@ -509,6 +538,28 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert FAKE_OPENAI_KEY not in encoded
 
 
+def test_join_url_accepts_http_urls_and_trims_edges():
+    assert _join_url(" https://voice.example.test/api/ ", " /v1/speak ") == "https://voice.example.test/api/v1/speak"
+
+
+def test_join_url_rejects_non_http_provider_urls_without_echoing_value():
+    unsafe = "file:///tmp/private-token-path"
+
+    with pytest.raises(ValueError) as exc_info:
+        _join_url(unsafe, "voices")
+
+    message = str(exc_info.value)
+    assert "http or https" in message
+    assert unsafe not in message
+    assert "private-token-path" not in message
+
+
+@pytest.mark.parametrize("base_url", ["", "example.test/api", "mailto:voice@example.test", "https:///missing-host"])
+def test_join_url_requires_http_url_with_host(base_url):
+    with pytest.raises(ValueError, match="http or https URL with a host|non-empty string"):
+        _join_url(base_url, "voices")
+
+
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     captured = {}
     payload = _payload(
@@ -857,6 +908,25 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
     assert captured["body"]["text"] == "Telegram voice note reply."
 
 
+def test_voice_speak_coherence_fails_on_exact_caption_mismatch():
+    result = _build_speak_coherence(
+        request={"text": "Approved spoken answer."},
+        payload={"caption_text": "Different caption.", "coherence_mode": "exact"},
+    )
+
+    assert result["check"] == "failed"
+    assert result["caption_matches_spoken"] is False
+
+
+def test_write_output_replaces_temp_file(tmp_path):
+    output_path = tmp_path / "voice-output.json"
+
+    _write_output(output_path, {"ok": True})
+
+    assert output_path.read_text(encoding="utf-8") == '{\n  "ok": true\n}'
+    assert not (tmp_path / "voice-output.json.tmp").exists()
+
+
 def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
     captured: dict[str, object] = {}
 
@@ -1075,6 +1145,57 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
     assert sent_messages[1]["type"] == "response.create"
     assert sent_messages[1]["response"]["instructions"] == sent_messages[0]["session"]["instructions"]
     assert sent_messages[1]["response"]["input"][0]["content"][0]["text"] == "Use the new realtime voice."
+
+
+def test_voice_speak_reports_malformed_openai_realtime_websocket_message(tmp_path):
+    sent_messages: list[dict[str, object]] = []
+    raw_payload = '{"type":"response.output_audio.delta","delta":"secret-token'
+
+    class FakeRealtimeSocket:
+        def send(self, message: str) -> None:
+            sent_messages.append(json.loads(message))
+
+        def recv(self) -> str:
+            return raw_payload
+
+        def close(self) -> None:
+            return None
+
+    def fake_create_connection(url: str, *, header: list[str], timeout: float):
+        return FakeRealtimeSocket()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TTS_PROVIDER=openai-realtime",
+                "VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2",
+                "VOICE_TTS_OPENAI_REALTIME_VOICE=coral",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with patch.dict(
+        sys.modules,
+        {"websocket": SimpleNamespace(create_connection=fake_create_connection)},
+    ):
+        with pytest.raises(RuntimeError) as exc_info:
+            handle_voice_speak_hook(
+                {
+                    "builder_env_file_path": str(env_file),
+                    "surface": "telegram",
+                    "text": "Use the new realtime voice.",
+                }
+            )
+
+    message = str(exc_info.value)
+    assert "OpenAI Realtime TTS received malformed websocket message" in message
+    assert "secret-token" not in message
+    assert sent_messages[0]["type"] == "session.update"
+    assert sent_messages[1]["type"] == "response.create"
 
 
 def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(tmp_path):
