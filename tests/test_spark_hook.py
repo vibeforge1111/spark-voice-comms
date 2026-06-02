@@ -853,6 +853,48 @@ def test_export_voice_runtime_state_for_spark_os_preserves_delivery_proof(tmp_pa
     assert "telegram-sendVoice-trace" in exported["source_ledger"]
 
 
+def test_export_voice_runtime_state_for_spark_os_preserves_audio_fallback_delivery_proof(tmp_path):
+    spark_home = tmp_path / "spark-home"
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "spark.voice_runtime_state.v1",
+                "telegram_delivery": {
+                    "ready": True,
+                    "last_send_voice_at": "2026-06-02T09:17:38Z",
+                    "last_send_voice_status": "document_fallback",
+                    "telegram_message_id_present": True,
+                    "send_method": "sendAudio",
+                    "native_voice_message_ready": False,
+                },
+                "latency": {"send_voice_ms": 64, "total_ms": 121},
+                "source_ledger": ["voice.speak", "telegram-bot-voice-bridge"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_tts_status",
+        return_value={"ready": True, "provider": "macos-say", "status": "ready via macOS say local system TTS"},
+    ), patch.dict("os.environ", {"SPARK_HOME": str(spark_home)}, clear=True):
+        result = export_voice_runtime_state_for_spark_os()
+
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    assert result["runtime_state"]["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["last_send_voice_status"] == "document_fallback"
+    assert exported["telegram_delivery"]["send_method"] == "sendAudio"
+    assert exported["telegram_delivery"]["native_voice_message_ready"] is False
+    assert exported["telegram_delivery"]["telegram_message_id_present"] is True
+    assert exported["latency"]["send_voice_ms"] == 64
+    assert exported["claim_levels"]["delivery_ready"] is True
+    assert exported["claim_levels"]["conversation_ready"] is True
+    assert "telegram-bot-voice-bridge" in exported["source_ledger"]
+
+
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
     captured = {}
     payload = _payload(

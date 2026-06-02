@@ -2376,10 +2376,13 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
         },
         "telegram_delivery": {
             "ready": bool(delivery.get("ready")),
+            "last_send_voice_at": delivery.get("last_send_voice_at"),
             "last_send_voice_at_present": bool(delivery.get("last_send_voice_at")),
             "last_send_voice_status": delivery.get("last_send_voice_status"),
             "last_failure_reason_present": bool(delivery.get("last_failure_reason")),
             "telegram_message_id_present": bool(delivery.get("telegram_message_id_present")),
+            "send_method": delivery.get("send_method"),
+            "native_voice_message_ready": bool(delivery.get("native_voice_message_ready")),
         },
         "latency": runtime_state.get("latency") if isinstance(runtime_state.get("latency"), dict) else {},
         "claim_levels": runtime_state.get("claim_levels") if isinstance(runtime_state.get("claim_levels"), dict) else {},
@@ -2418,12 +2421,13 @@ def _runtime_state_with_preserved_delivery(public_state: dict[str, Any], target:
         return public_state
     existing_delivery = existing.get("telegram_delivery") if isinstance(existing.get("telegram_delivery"), dict) else {}
     existing_status = str(existing_delivery.get("last_send_voice_status") or existing_delivery.get("status") or "")
-    if not (existing_delivery.get("ready") is True or existing_status == "success"):
+    if not (existing_delivery.get("ready") is True or existing_status in {"success", "document_fallback"}):
         return public_state
 
     merged = json.loads(json.dumps(public_state))
     merged["telegram_delivery"] = {
         "ready": True,
+        "last_send_voice_at": existing_delivery.get("last_send_voice_at"),
         "last_send_voice_at_present": bool(
             existing_delivery.get("last_send_voice_at") or existing_delivery.get("last_send_voice_at_present")
         ),
@@ -2434,6 +2438,8 @@ def _runtime_state_with_preserved_delivery(public_state: dict[str, Any], target:
         "telegram_message_id_present": bool(
             existing_delivery.get("telegram_message_id_present") or existing_delivery.get("telegram_message_id")
         ),
+        "send_method": existing_delivery.get("send_method"),
+        "native_voice_message_ready": bool(existing_delivery.get("native_voice_message_ready")),
     }
     latency = merged.get("latency") if isinstance(merged.get("latency"), dict) else {}
     existing_latency = existing.get("latency") if isinstance(existing.get("latency"), dict) else {}
