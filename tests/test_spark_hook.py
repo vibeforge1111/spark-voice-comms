@@ -13,6 +13,8 @@ from unittest.mock import patch
 import pytest
 
 from voice_comms_chip.spark_hook import (
+    _build_speak_coherence,
+    _write_output,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
@@ -881,6 +883,25 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
     assert headers["accept"] == "audio/mpeg"
     assert "output_format=opus_48000_64" in captured["url"]
     assert captured["body"]["text"] == "Telegram voice note reply."
+
+
+def test_voice_speak_coherence_fails_on_exact_caption_mismatch():
+    result = _build_speak_coherence(
+        request={"text": "Approved spoken answer."},
+        payload={"caption_text": "Different caption.", "coherence_mode": "exact"},
+    )
+
+    assert result["check"] == "failed"
+    assert result["caption_matches_spoken"] is False
+
+
+def test_write_output_replaces_temp_file(tmp_path):
+    output_path = tmp_path / "voice-output.json"
+
+    _write_output(output_path, {"ok": True})
+
+    assert output_path.read_text(encoding="utf-8") == '{\n  "ok": true\n}'
+    assert not (tmp_path / "voice-output.json.tmp").exists()
 
 
 def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
