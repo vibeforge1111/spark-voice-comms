@@ -756,8 +756,13 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
     elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
-    else:
+    elif request["provider_id"] == DEFAULT_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+    else:
+        raise RuntimeError(
+            "voice.speak resolved an unsupported TTS provider after request validation. "
+            "This is an internal routing bug."
+        )
     synthesize_ms = _elapsed_ms(synthesize_started)
     runtime_payload = {
         **payload,
@@ -982,7 +987,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
                 provider_note = (
                     "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
                 )
-        except Exception as exc:
+        except ValueError as exc:
             provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
         return {
             "ready": True,
@@ -1003,7 +1008,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         }
     try:
         provider = _resolve_provider(payload)
-    except Exception as exc:
+    except ValueError as exc:
         return {
             "ready": False,
             "local_ready": False,
@@ -1311,7 +1316,11 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
     if provider_id or base_url or secret_env_ref:
         resolved_provider_id = provider_id or "openai"
         if resolved_provider_id != "openai":
-            raise ValueError(f"VOICE_TRANSCRIBE_PROVIDER '{resolved_provider_id}' is not supported yet.")
+            raise ValueError(
+                f"VOICE_TRANSCRIBE_PROVIDER {resolved_provider_id!r} is not supported yet. "
+                "Supported values: openai, auto, default, local, offline, faster-whisper, "
+                "local-faster-whisper, builder, provider, configured-provider."
+            )
         resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
@@ -1484,7 +1493,16 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
         return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
-        raise ValueError(f"voice.speak does not yet support provider '{provider_id}'.")
+        supported_providers = sorted(
+            {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}
+            | {LOCAL_TTS_PROVIDER, "local"}
+            | OPENAI_REALTIME_PROVIDER_ALIASES
+            | {"elevenlabs"}
+        )
+        raise ValueError(
+            f"voice.speak does not yet support provider {provider_id!r}. "
+            f"Supported provider_id values: {', '.join(supported_providers)}."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice synthesis.")
     auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
@@ -1706,7 +1724,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
 def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         pyttsx3 = importlib.import_module("pyttsx3")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
     temp_path = None
     try:
@@ -1745,10 +1763,16 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
         soundfile = importlib.import_module("soundfile")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
-    model_path = Path(str(request.get("model_path") or ""))
-    voices_path = Path(str(request.get("voices_path") or ""))
+    raw_model_path = str(request.get("model_path") or "").strip()
+    raw_voices_path = str(request.get("voices_path") or "").strip()
+    if not raw_model_path:
+        raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
+    if not raw_voices_path:
+        raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
+    model_path = Path(raw_model_path)
+    voices_path = Path(raw_voices_path)
     if not model_path.exists():
         raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
     if not voices_path.exists():
@@ -1771,7 +1795,7 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
 def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         websocket = importlib.import_module("websocket")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError(
             "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
         ) from exc
