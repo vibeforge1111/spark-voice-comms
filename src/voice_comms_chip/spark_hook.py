@@ -2088,7 +2088,16 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
 
 
 def _join_url(base_url: str, suffix: str) -> str:
-    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("base_url must be a non-empty string")
+    if not isinstance(suffix, str) or not suffix.strip():
+        raise ValueError("suffix must be a non-empty string")
+    clean_base = base_url.strip()
+    parsed = urllib.parse.urlparse(clean_base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base_url must use an http or https URL with a host")
+    return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:

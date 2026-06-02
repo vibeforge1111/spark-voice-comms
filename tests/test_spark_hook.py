@@ -14,6 +14,7 @@ import pytest
 
 from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
+    _join_url,
     _write_output,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
@@ -535,6 +536,28 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert "transcript_text" not in encoded
     assert "audio_base64" not in encoded
     assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_join_url_accepts_http_urls_and_trims_edges():
+    assert _join_url(" https://voice.example.test/api/ ", " /v1/speak ") == "https://voice.example.test/api/v1/speak"
+
+
+def test_join_url_rejects_non_http_provider_urls_without_echoing_value():
+    unsafe = "file:///tmp/private-token-path"
+
+    with pytest.raises(ValueError) as exc_info:
+        _join_url(unsafe, "voices")
+
+    message = str(exc_info.value)
+    assert "http or https" in message
+    assert unsafe not in message
+    assert "private-token-path" not in message
+
+
+@pytest.mark.parametrize("base_url", ["", "example.test/api", "mailto:voice@example.test", "https:///missing-host"])
+def test_join_url_requires_http_url_with_host(base_url):
+    with pytest.raises(ValueError, match="http or https URL with a host|non-empty string"):
+        _join_url(base_url, "voices")
 
 
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
