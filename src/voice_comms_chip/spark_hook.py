@@ -253,7 +253,9 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
+    target = str(payload.get("target") or payload.get("provider") or "").strip().lower()
+    if not target:
+        raise ValueError("voice.install requires an explicit `target`: `kokoro`, `faster-whisper`, or `local`.")
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
@@ -1345,6 +1347,10 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
             "fallback_reason": reason,
+            "routable": False,
+            "route_to_builder": False,
+            "diagnostic_only": True,
+            "transcript_source": "diagnostic_fallback",
         },
     }
 
@@ -1859,7 +1865,7 @@ def _build_deterministic_fallback_transcript(
     approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
     snippets = [
         "Ready when you are.",
-        "Holding for your next command.",
+        "Holding for a fresh voice note.",
         "Signal received and queued.",
         "Spark fallback captured your audio.",
         "Mic packet decoded locally.",
