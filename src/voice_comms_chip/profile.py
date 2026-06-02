@@ -11,9 +11,22 @@ DEFAULT_PROFILE_PATH = PROJECT_ROOT / "voices" / "spark_core.voice_profile.json"
 
 def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     target = Path(path) if path else DEFAULT_PROFILE_PATH
-    payload = json.loads(target.read_text(encoding="utf-8"))
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
+            "profile path to load_voice_profile()."
+        ) from exc
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Voice profile at '{target}' contains invalid JSON. "
+            "Reinstall the voice-comms chip or fix the profile file."
+        ) from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"Voice profile at '{target}' must be a JSON object.")
+        raise ValueError("Voice profile must be a JSON object.")
     return payload
 
 

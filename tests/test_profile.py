@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from voice_comms_chip.profile import DEFAULT_PROFILE_PATH, load_voice_profile, summarize_voice_profile
 
 
@@ -22,3 +24,10 @@ def test_default_voice_profile_summary_is_stable():
 def test_default_profile_path_exists():
     assert DEFAULT_PROFILE_PATH.exists()
 
+
+def test_load_voice_profile_reports_invalid_json(tmp_path):
+    profile_path = tmp_path / "voice_profile.json"
+    profile_path.write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="contains invalid JSON"):
+        load_voice_profile(str(profile_path))
