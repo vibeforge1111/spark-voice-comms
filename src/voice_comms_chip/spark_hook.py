@@ -114,6 +114,30 @@ class _PublicHookInputError(ValueError):
         self.error_code = error_code
 
 
+def _read_response_bounded(
+    response: object, *, max_bytes: int, label: str = "response"
+) -> bytes:
+    """Read an HTTP response body in chunks with a hard size limit.
+
+    Prevents OOM when a remote server returns an unexpectedly large body.
+    """
+    chunk_size = 64 * 1024  # 64 KB
+    buf = io.BytesIO()
+    total = 0
+    while True:
+        chunk = response.read(chunk_size)  # type: ignore[union-attr]
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise RuntimeError(
+                f"{label} body exceeded {max_bytes} bytes limit "
+                f"(read {total} bytes so far); aborting to prevent OOM."
+            )
+        buf.write(chunk)
+    return buf.getvalue()
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
@@ -1703,7 +1727,9 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
         )
         try:
             with urllib.request.urlopen(req, timeout=45) as response:
-                audio_bytes = response.read()
+                audio_bytes = _read_response_bounded(
+                    response, max_bytes=50 * 1024 * 1024, label="ElevenLabs TTS audio"
+                )
             if not audio_bytes:
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
@@ -1928,7 +1954,11 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(
+                _read_response_bounded(
+                    response, max_bytes=1 * 1024 * 1024, label="ElevenLabs voice list"
+                ).decode("utf-8")
+            )
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning(
             "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
@@ -2156,7 +2186,9 @@ def _post_multipart(
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            return response.read()
+            return _read_response_bounded(
+                response, max_bytes=1 * 1024 * 1024, label="voice provider multipart"
+            )
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
     except urllib.error.URLError as exc:
