@@ -1407,10 +1407,22 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
-    if not path.exists():
+    # EAFP: a single read with try/except is atomic; the previous
+    # exists()-then-read_text() opened a race window where an operator
+    # rotating the Builder .env (or an installer swap during voice setup)
+    # could remove the file between the check and the read, raising
+    # FileNotFoundError out of the helper instead of the curated
+    # ValueError the callers contract on. Callers at l.949 / l.1067
+    # catch (OSError, ValueError) / Exception assuming the curated
+    # ValueError shape; an un-caught FileNotFoundError from _runtime_env_map
+    # (l.1381, no try/except) propagates to voice-transcribe provider
+    # resolution and aborts the request.
+    try:
+        raw = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
+    for line in raw.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
