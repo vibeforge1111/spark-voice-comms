@@ -2324,10 +2324,13 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--profile", help="Override voice profile path")
     args = parser.parse_args()
 
     try:
         payload = _load_hook_payload(Path(args.input), hook=args.hook)
+        if args.profile:
+            payload["voice_profile_path"] = str(args.profile)
         if args.hook == "voice.status":
             result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
