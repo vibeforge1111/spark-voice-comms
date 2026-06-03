@@ -2233,13 +2233,13 @@ def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
 def _hook_error_payload(exc: Exception) -> dict[str, Any]:
     error_code = ""
     if isinstance(exc, _PublicHookInputError):
-        detail = str(exc)
+        detail = "An internal error occurred. Check logs for details."
         error_code = exc.error_code
     elif isinstance(exc, json.JSONDecodeError):
         detail = "Voice hook input must be valid JSON."
         error_code = "voice_hook_invalid_json"
     else:
-        detail = str(exc)
+        detail = "An internal error occurred. Check logs for details."
     payload: dict[str, Any] = {
         "returncode": 1,
         "stdout": "",
