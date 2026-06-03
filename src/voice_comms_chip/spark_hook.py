@@ -2239,7 +2239,7 @@ def _hook_error_payload(exc: Exception) -> dict[str, Any]:
         detail = "Voice hook input must be valid JSON."
         error_code = "voice_hook_invalid_json"
     else:
-        detail = str(exc)
+        detail = f"{type(exc).__name__}: an internal error occurred. Check logs for details."
     payload: dict[str, Any] = {
         "returncode": 1,
         "stdout": "",
