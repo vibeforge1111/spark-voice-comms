@@ -10,7 +10,9 @@ DEFAULT_PROFILE_PATH = PROJECT_ROOT / "voices" / "spark_core.voice_profile.json"
 
 
 def load_voice_profile(path: str | None = None) -> dict[str, Any]:
-    target = Path(path) if path else DEFAULT_PROFILE_PATH
+    target = Path(path).resolve() if path else DEFAULT_PROFILE_PATH
+    if not target.is_relative_to(PROJECT_ROOT.resolve()):
+        raise ValueError(f"Path must be within project directory: {target}")
     try:
         raw = target.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
