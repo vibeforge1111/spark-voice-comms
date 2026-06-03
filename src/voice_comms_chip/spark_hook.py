@@ -1811,6 +1811,8 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     ws = websocket.create_connection(url, header=headers, timeout=timeout)
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
+    # Guard against unbounded audio accumulation from misbehaving WebSocket servers.
+    MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MiB
     try:
         session_payload: dict[str, Any] = {
             "type": "session.update",
@@ -1876,11 +1878,19 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 delta = str(event.get("delta") or "")
                 if delta:
                     audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+                    if sum(len(c) for c in audio_chunks) > MAX_AUDIO_BYTES:
+                        raise RuntimeError(
+                            f"OpenAI Realtime TTS exceeded maximum audio size ({MAX_AUDIO_BYTES} bytes)."
+                        )
             elif event_type == "response.content_part.done":
                 part = event.get("part") if isinstance(event.get("part"), dict) else {}
                 audio = str(part.get("audio") or "")
                 if audio:
                     fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+                    if sum(len(c) for c in fallback_audio_chunks) > MAX_AUDIO_BYTES:
+                        raise RuntimeError(
+                            f"OpenAI Realtime TTS exceeded maximum audio size ({MAX_AUDIO_BYTES} bytes)."
+                        )
             elif event_type == "response.done":
                 break
     finally:
