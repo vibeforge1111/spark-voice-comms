@@ -50,6 +50,7 @@ DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
 )
 OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
+MAX_TTS_TEXT_BYTES = 100_000  # 100KB safety limit to prevent oversized TTS requests
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
 ENV_TTS_MODEL_ID = "VOICE_TTS_ELEVENLABS_MODEL_ID"
 ENV_TTS_VOICE_ID = "VOICE_TTS_ELEVENLABS_VOICE_ID"
@@ -1480,6 +1481,12 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     text = str(payload.get("text") or "").strip()
     if not text:
         raise ValueError("voice.speak requires non-empty text.")
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > MAX_TTS_TEXT_BYTES:
+        raise ValueError(
+            f"voice.speak text exceeds maximum length ({text_bytes} bytes > "
+            f"{MAX_TTS_TEXT_BYTES} bytes). Truncate or shorten the input text."
+        )
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
