@@ -116,7 +116,11 @@ class _PublicHookInputError(ValueError):
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError as exc:
+        profile_summary = {"profile_name": "unknown", "tone_identity": "unknown", "default_emotion": "unknown", "barge_in_enabled": False, "streaming_reply_default": False, "provider_voice_ids": []}
+        status["reason"] = f"{status.get("reason", "voice status error")}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
