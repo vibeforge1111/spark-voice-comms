@@ -2324,12 +2324,23 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--dry-run", action="store_true", help="Check readiness without side effects (voice.status only)")
     args = parser.parse_args()
 
     try:
         payload = _load_hook_payload(Path(args.input), hook=args.hook)
         if args.hook == "voice.status":
-            result = handle_voice_status_hook(payload)
+            if args.dry_run:
+                status = _build_voice_status(payload)
+                result = {
+                    "returncode": 0,
+                    "stdout": "dry_run_ready" if status.get("ready") else "dry_run_not_ready",
+                    "stderr": "",
+                    "metrics": {"ready": 1 if status["ready"] else 0, "dry_run": 1},
+                    "result": {"ready": bool(status.get("ready")), "reason": status.get("reason", ""), "dry_run": True},
+                }
+            else:
+                result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
             result = handle_voice_plan_hook(payload)
         elif args.hook == "voice.onboard":
@@ -2344,7 +2355,8 @@ def main() -> int:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
-    _export_runtime_state_if_configured(result)
+    if not args.dry_run:
+        _export_runtime_state_if_configured(result)
     _write_output(Path(args.output), result)
     return 0
 
