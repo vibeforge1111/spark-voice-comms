@@ -2324,6 +2324,7 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--output-format", choices=["json", "text"], default="json", help="Output format for machine-readable results")
     args = parser.parse_args()
 
     try:
