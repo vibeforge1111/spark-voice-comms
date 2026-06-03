@@ -14,6 +14,7 @@ import pytest
 
 from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
+    _is_private_host,
     _join_url,
     _write_output,
     handle_voice_install_hook,
@@ -688,6 +689,58 @@ def test_join_url_rejects_non_http_provider_urls_without_echoing_value():
 def test_join_url_requires_http_url_with_host(base_url):
     with pytest.raises(ValueError, match="http or https URL with a host|non-empty string"):
         _join_url(base_url, "voices")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://127.0.0.1:8080/api",
+        "http://10.0.0.1/api",
+        "http://172.16.0.1/api",
+        "http://192.168.1.1/api",
+        "http://169.254.169.254/api",
+        "http://0.0.0.0/api",
+        "http://[::1]/api",
+        "http://[fc00::1]/api",
+        "http://[fe80::1]/api",
+        "https://10.0.0.1:9090/api",
+    ],
+)
+def test_join_url_rejects_private_and_internal_ip(base_url):
+    with pytest.raises(ValueError, match="private or internal IP"):
+        _join_url(base_url, "voices")
+
+
+def test_join_url_accepts_public_ip():
+    assert _join_url("http://8.8.8.8/api", "voices") == "http://8.8.8.8/api/voices"
+
+
+def test_join_url_accepts_public_hostname():
+    assert (
+        _join_url("https://api.elevenlabs.io/v1", "voices")
+        == "https://api.elevenlabs.io/v1/voices"
+    )
+
+
+@pytest.mark.parametrize(
+    "ip,expected",
+    [
+        ("127.0.0.1", True),
+        ("10.0.0.1", True),
+        ("172.16.0.1", True),
+        ("192.168.1.1", True),
+        ("169.254.169.254", True),
+        ("0.0.0.0", True),
+        ("::1", True),
+        ("fc00::1", True),
+        ("fe80::1", True),
+        ("8.8.8.8", False),
+        ("api.elevenlabs.io", False),
+        ("1.1.1.1", False),
+    ],
+)
+def test_is_private_host(ip, expected):
+    assert _is_private_host(ip) is expected
 
 
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):

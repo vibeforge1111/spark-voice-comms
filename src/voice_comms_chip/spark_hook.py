@@ -4,6 +4,7 @@ import argparse
 import base64
 import binascii
 import hashlib
+import ipaddress
 import importlib
 import importlib.util
 import io
@@ -2183,8 +2184,38 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     return ""
 
 
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/32"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
+def _is_private_host(hostname: str) -> bool:
+    """Return True if *hostname* resolves to a blocked internal IP address."""
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # hostname is not a literal IP — allow it (DNS-based SSRF is out of
+        # scope; callers should trust their DNS or enforce an allow-list).
+        return False
+    return any(addr in net for net in _BLOCKED_NETWORKS)
+
+
 def _join_url(base_url: str, suffix: str) -> str:
-    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs.
+
+    Also rejects URLs whose host component is a private or internal IP
+    address to mitigate server-side request forgery (SSRF) via the REST
+    API paths used for ElevenLabs TTS, voice-list fallback, and
+    transcription providers.
+    """
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty string")
     if not isinstance(suffix, str) or not suffix.strip():
@@ -2193,6 +2224,11 @@ def _join_url(base_url: str, suffix: str) -> str:
     parsed = urllib.parse.urlparse(clean_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
+    # Extract hostname (strip port if present) and validate against
+    # private/internal IP ranges to prevent REST API SSRF.
+    hostname = parsed.hostname or ""
+    if _is_private_host(hostname):
+        raise ValueError("base_url must not point to a private or internal IP address")
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
