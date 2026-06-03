@@ -114,6 +114,16 @@ class _PublicHookInputError(ValueError):
         self.error_code = error_code
 
 
+def _voice_status_exact_check_lines() -> list[str]:
+    return [
+        "",
+        "Exact safe checks:",
+        "- Readiness: `/voice status`.",
+        "- Spoken reply and audio encoding: `/voice speak Voice setup smoke test.`",
+        "- Telegram delivery proof: send one short voice note, then check `/probe voice` or `/voice dashboard` for sendVoice proof.",
+    ]
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
@@ -150,6 +160,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
             ]
         )
+        lines.extend(_voice_status_exact_check_lines())
     else:
         lines = [
             "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
@@ -165,6 +176,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
             lines.append(
                 "Next: finish provider setup for voice transcription, then rerun `/voice`."
             )
+        lines.extend(_voice_status_exact_check_lines())
     return {
         "returncode": 0,
         "stdout": status["reason"],

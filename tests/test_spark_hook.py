@@ -95,6 +95,9 @@ def test_voice_status_default_requires_local_faster_whisper(tmp_path):
     assert result["result"]["provider_id"] == "local_faster_whisper"
     assert "local faster-whisper transcription is the default Telegram voice path" in result["result"]["reason"]
     assert "Voice chip is not ready yet." in result["result"]["reply_text"]
+    assert "Readiness: `/voice status`." in result["result"]["reply_text"]
+    assert "Spoken reply and audio encoding: `/voice speak Voice setup smoke test.`" in result["result"]["reply_text"]
+    assert "Telegram delivery proof: send one short voice note" in result["result"]["reply_text"]
 
 
 def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
@@ -165,6 +168,9 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
     assert "Local voice is ready." in result["result"]["reply_text"]
     assert "Custom provider transcription compatibility is not verified yet" in result["result"]["reply_text"]
     assert "ask me to say something with Kokoro" in result["result"]["reply_text"]
+    assert "Readiness: `/voice status`." in result["result"]["reply_text"]
+    assert "Spoken reply and audio encoding: `/voice speak Voice setup smoke test.`" in result["result"]["reply_text"]
+    assert "Telegram delivery proof: send one short voice note" in result["result"]["reply_text"]
     assert "Voice chip is not ready yet" not in result["result"]["reply_text"]
 
 
