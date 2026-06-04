@@ -103,3 +103,23 @@ def test_transcribe_state_tracks_transcript_without_delivery_claim():
     assert state["transcript"]["characters"] == len("Hello from a voice note.")
     assert state["transcript"]["audio_bytes"] == 321
     assert state["claim_levels"]["conversation_ready"] is False
+
+def test_delivery_ready_requires_success_status_even_when_ready_flag_is_true():
+    state = build_voice_runtime_state(
+        generated_at="2026-05-09T00:00:00Z",
+        surface="telegram",
+        stt={"provider_id": "openai", "mode": "hosted", "ready": True},
+        tts={"provider_id": "elevenlabs", "mode": "hosted", "ready": True},
+        telegram_delivery={
+            "ready": True,
+            "status": "failed",
+            "telegram_message_id": 123,
+        },
+        source_ledger=["voice.speak"],
+    )
+
+    assert state["telegram_delivery"]["last_send_voice_status"] == "failed"
+    assert state["telegram_delivery"]["telegram_message_id_present"] is True
+    assert state["telegram_delivery"]["ready"] is False
+    assert state["claim_levels"]["delivery_ready"] is False
+    assert state["claim_levels"]["conversation_ready"] is False

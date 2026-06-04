@@ -202,7 +202,7 @@ def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
 def _normalize_telegram_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
     status = str(delivery.get("last_send_voice_status") or delivery.get("status") or "unknown")
     return {
-        "ready": bool(delivery.get("ready") or status == "success"),
+        "ready": status == "success",
         "last_send_voice_at": _optional_string(delivery.get("last_send_voice_at")),
         "last_send_voice_status": status,
         "last_failure_reason": _safe_reason(delivery.get("last_failure_reason") or delivery.get("failure_reason")),
