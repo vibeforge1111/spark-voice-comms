@@ -1783,7 +1783,15 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
             temp_path = handle.name
-        engine = pyttsx3.init()
+        try:
+            engine = pyttsx3.init()
+        except Exception as exc:
+            raise RuntimeError(
+                "Local pyttsx3 TTS could not initialize a speech driver. "
+                "On Linux install `espeak` (or `espeak-ng`); on macOS the system `nsss` driver should be available; "
+                "on Windows the `sapi5` driver should be available. Underlying cause: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
         rate = request.get("rate")
         if rate is not None:
             engine.setProperty("rate", int(rate))
