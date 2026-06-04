@@ -48,6 +48,55 @@ DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
 )
+ALLOWED_ELEVENLABS_BASE_URLS = frozenset({
+    "https://api.elevenlabs.io/v1",
+})
+ALLOWED_OPENAI_REALTIME_WS_URLS = frozenset({
+    "wss://api.openai.com/v1/realtime",
+})
+ALLOWED_OPENAI_TRANSCRIPTION_BASE_URLS = frozenset({
+    "https://api.openai.com/v1",
+})
+
+
+def _validate_base_url(url: str, *, allowed: frozenset[str], label: str) -> str:
+    """Validate that a user-supplied base_url is safe and trusted.
+
+    Rejects non-HTTPS schemes, private/loopback IPs, and any URL not in the
+    provider allowlist.  This prevents SSRF attacks where an attacker supplies
+    a rogue base_url to exfiltrate API keys or probe internal services.
+    """
+    normalized = url.strip().rstrip("/")
+    if normalized not in allowed:
+        raise ValueError(
+            f"{label} base_url {normalized!r} is not in the trusted allowlist. "
+            f"Allowed URLs: {sorted(allowed)}"
+        )
+    parsed = urllib.parse.urlparse(normalized)
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname or ""
+    if scheme not in {"https", "wss"}:
+        raise ValueError(f"{label} base_url must use HTTPS/WSS; got scheme {scheme!r}.")
+    if _is_private_or_loopback_host(hostname):
+        raise ValueError(f"{label} base_url must not target a private/loopback host; got {hostname!r}.")
+    return normalized
+
+
+def _is_private_or_loopback_host(hostname: str) -> bool:
+    """Return True if *hostname* resolves to a loopback or private range."""
+    if hostname in {"localhost", "0.0.0.0", "[::1]", "127.0.0.1", "::1"}:
+        return True
+    try:
+        import ipaddress
+        addr = ipaddress.ip_address(hostname)
+        return addr.is_loopback or addr.is_private or addr.is_reserved or addr.is_link_local
+    except ValueError:
+        pass
+    if hostname and all(c in "0123456789." for c in hostname):
+        return True
+    return False
+
+
 OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
@@ -1325,10 +1374,15 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
             raise ValueError(_missing_voice_secret_message("Voice transcription"))
+        resolved_base_url = _validate_base_url(
+            base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            allowed=ALLOWED_OPENAI_TRANSCRIPTION_BASE_URLS,
+            label="voice.transcribe",
+        )
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
-            "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            "base_url": resolved_base_url,
             "secret_value": str(secret_value).strip(),
         }
     openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
@@ -1527,8 +1581,12 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     return {
         "provider_id": "elevenlabs",
         "surface": surface,
-        "base_url": str(tts.get("base_url") or env_map.get(ENV_TTS_BASE_URL) or DEFAULT_ELEVENLABS_BASE_URL).strip()
-        or DEFAULT_ELEVENLABS_BASE_URL,
+        "base_url": _validate_base_url(
+            str(tts.get("base_url") or env_map.get(ENV_TTS_BASE_URL) or DEFAULT_ELEVENLABS_BASE_URL).strip()
+            or DEFAULT_ELEVENLABS_BASE_URL,
+            allowed=ALLOWED_ELEVENLABS_BASE_URLS,
+            label="voice.speak",
+        ),
         "secret_value": secret_value,
         "text": text,
         "voice_id": str(tts.get("voice_id") or env_map.get(ENV_TTS_VOICE_ID) or provider_profile.get("primary_voice_id") or "").strip(),
@@ -1636,8 +1694,12 @@ def _resolve_openai_realtime_tts_request(
         "provider_id": OPENAI_REALTIME_TTS_PROVIDER,
         "surface": surface,
         "text": text,
-        "base_url": str(tts.get("base_url") or env_map.get(ENV_OPENAI_REALTIME_WS_URL) or DEFAULT_OPENAI_REALTIME_WS_URL).strip()
-        or DEFAULT_OPENAI_REALTIME_WS_URL,
+        "base_url": _validate_base_url(
+            str(tts.get("base_url") or env_map.get(ENV_OPENAI_REALTIME_WS_URL) or DEFAULT_OPENAI_REALTIME_WS_URL).strip()
+            or DEFAULT_OPENAI_REALTIME_WS_URL,
+            allowed=ALLOWED_OPENAI_REALTIME_WS_URLS,
+            label="voice.speak (openai-realtime)",
+        ),
         "secret_value": secret_value,
         "model_id": model_id,
         "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_OPENAI_REALTIME_VOICE) or DEFAULT_OPENAI_REALTIME_VOICE).strip()
