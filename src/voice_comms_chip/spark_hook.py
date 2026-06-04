@@ -110,7 +110,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
         profile_name = str(profile_summary["profile_name"])
         tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
         lines = [
-            "Local voice is ready." if local_tts_ready else "Local transcription is ready.",
+            "Local voice is ready." if local_tts_ready else "Voice partially ready — STT OK, TTS missing.",
             "",
             "I will listen with faster-whisper from this machine.",
         ]
