@@ -8,6 +8,7 @@ SCHEMA_VERSION = "spark.voice_runtime_state.v1"
 CANONICAL_CHIP_KEY = "spark-voice-comms"
 
 
+# guard: defensive wrapping
 def build_voice_runtime_state(
     *,
     surface: str = "unknown",
