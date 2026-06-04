@@ -86,8 +86,8 @@ def test_build_voice_status_env_merge_oserror_guarded(tmp_path):
             "provider": {"provider_id": "openai", "provider_kind": "openai"},
         })
 
-    assert result.get("ready") is True  # local is ready
-    assert result.get("local_ready") is True
+    assert result["ready"] is True  # local is ready
+    assert result["local_ready"] is True
 
 
 def test_build_voice_status_env_merge_valueerror_guarded(tmp_path):
@@ -113,5 +113,5 @@ def test_build_voice_status_env_merge_valueerror_guarded(tmp_path):
             "provider": {"provider_id": "openai", "provider_kind": "openai"},
         })
 
-    assert result.get("ready") is True
-    assert result.get("local_ready") is True
+    assert result["ready"] is True
+    assert result["local_ready"] is True
