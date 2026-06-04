@@ -835,7 +835,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 audio_bytes=audio_bytes,
                 filename=filename,
             )
-        except Exception as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
                     _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
@@ -1077,7 +1077,7 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
-        except Exception as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             env_note = f"Builder env file unavailable: {exc}"
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
