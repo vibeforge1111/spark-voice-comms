@@ -364,7 +364,36 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
             "kokoro-onnx>=0.5.0",
             "soundfile>=0.12",
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except subprocess.TimeoutExpired as exc:
+            partial_output = "\n".join(
+                part for part in (
+                    exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, (bytes, bytearray)) else str(exc.stdout or ""),
+                    exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, (bytes, bytearray)) else str(exc.stderr or ""),
+                ) if part
+            ).strip()
+            pip_tail = _tail_nonempty_lines(partial_output, limit=8)
+            return {
+                "returncode": 1,
+                "stdout": "kokoro install timed out",
+                "stderr": f"pip install exceeded {int(exc.timeout)}s without completing.",
+                "error_code": "voice_install_timeout",
+                "metrics": {"installed": 0, "already_installed": 0},
+                "result": {
+                    "reply_text": (
+                        "Kokoro install timed out before pip finished.\n"
+                        "I did not touch provider keys or model paths.\n"
+                        "Next: check network or pip cache, then rerun `/voice install kokoro`."
+                    ),
+                    "target": target,
+                    "python": sys.executable,
+                    "installed": False,
+                    "already_installed": False,
+                    "pip_tail": pip_tail,
+                    "error_code": "voice_install_timeout",
+                },
+            }
         pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         pip_tail = _tail_nonempty_lines(pip_output, limit=8)
         if completed.returncode != 0:
