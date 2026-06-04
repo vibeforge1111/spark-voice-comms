@@ -877,7 +877,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             filename=filename,
             mime_type=mime_type,
         )
-    except Exception as exc:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         if fallback_mode == "deterministic":
             return _with_transcribe_runtime_state(
                 _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
