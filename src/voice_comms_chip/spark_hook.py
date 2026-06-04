@@ -1617,7 +1617,7 @@ def _resolve_kokoro_tts_request(
         raise ValueError(
             f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
         )
-    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
+    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED), setting_name=ENV_KOKORO_SPEED)
     if speed is None:
         speed = 1.0
     return {
@@ -1646,8 +1646,8 @@ def _resolve_local_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
-    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
+    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE), setting_name=ENV_LOCAL_TTS_RATE)
+    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME), setting_name=ENV_LOCAL_TTS_VOLUME)
     voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
     return {
         "provider_id": LOCAL_TTS_PROVIDER,
@@ -1677,10 +1677,13 @@ def _resolve_openai_realtime_tts_request(
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
-    timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+    timeout_seconds = _resolve_optional_float(
+        tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS),
+        setting_name=ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
+    )
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
-    sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+    sample_rate = int(_resolve_optional_float(tts.get("sample_rate"), setting_name="tts.sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
     model_id = str(
         tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
     ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
@@ -1715,13 +1718,18 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
     )
 
 
-def _resolve_optional_float(value: Any) -> float | None:
+def _resolve_optional_float(value: Any, *, setting_name: str | None = None) -> float | None:
     text = str(value or "").strip()
     if not text:
         return None
     try:
         return float(text)
     except ValueError:
+        label = setting_name or "voice optional float setting"
+        logger.warning(
+            "voice-comms: ignored unparseable %s; falling back to provider default",
+            label,
+        )
         return None
 
 
