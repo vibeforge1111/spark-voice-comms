@@ -2079,6 +2079,11 @@ def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
             return True
         if configured in {"0", "false", "no", "off"}:
             return False
+        if configured:
+            logger.warning(
+                "voice-comms: ignored unrecognized VOICE_TRANSCRIBE_LOCAL_VAD_FILTER value; "
+                "falling back to default vad_filter=True. Accepted values: 1/0, true/false, yes/no, on/off.",
+            )
     return True
 
 
