@@ -31,6 +31,9 @@ DEFAULT_TRANSCRIPTION_MODEL = "whisper-1"
 SUPPORTED_PROVIDER_KINDS = {"openai", "custom"}
 SUPPORTED_FALLBACK_MODES = {"deterministic"}
 DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
+ALLOWED_OPENAI_TRANSCRIPTION_BASE_URLS = frozenset({
+    "https://api.openai.com/v1",
+})
 DEFAULT_TTS_PROVIDER = "elevenlabs"
 LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
@@ -1247,6 +1250,42 @@ def _missing_voice_secret_message(context: str) -> str:
     )
 
 
+def _is_private_or_loopback_host(hostname: str) -> bool:
+    """Return True if *hostname* resolves to a loopback or private range."""
+    if hostname in {"localhost", "0.0.0.0", "[::1]", "127.0.0.1", "::1"}:
+        return True
+    try:
+        import ipaddress
+        addr = ipaddress.ip_address(hostname)
+        return addr.is_loopback or addr.is_private or addr.is_reserved or addr.is_link_local
+    except ValueError:
+        pass
+    return False
+
+
+def _validate_base_url(url: str, *, allowed: frozenset[str], label: str) -> str:
+    """Validate that a user-supplied base_url is safe and trusted.
+
+    Rejects non-HTTPS schemes, private/loopback IPs, and any URL not in the
+    provider allowlist.  This prevents SSRF attacks where an attacker supplies
+    a rogue base_url to exfiltrate API keys or probe internal services.
+    """
+    normalized = url.strip().rstrip("/")
+    if normalized not in allowed:
+        raise ValueError(
+            f"{label} base_url {normalized!r} is not in the trusted allowlist. "
+            f"Allowed URLs: {sorted(allowed)}"
+        )
+    parsed = urllib.parse.urlparse(normalized)
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname or ""
+    if scheme not in {"https", "wss"}:
+        raise ValueError(f"{label} base_url must use HTTPS/WSS; got scheme {scheme!r}.")
+    if _is_private_or_loopback_host(hostname):
+        raise ValueError(f"{label} base_url must not target a private/loopback host; got {hostname!r}.")
+    return normalized
+
+
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     dedicated_provider = _resolve_dedicated_transcription_provider(payload)
     if dedicated_provider is not None:
@@ -1292,10 +1331,23 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
+    if provider_kind == "openai":
+        validated_base_url = _validate_base_url(
+            base_url,
+            allowed=ALLOWED_OPENAI_TRANSCRIPTION_BASE_URLS,
+            label="voice.transcribe",
+        )
+    else:
+        # Custom providers: enforce HTTPS/WSS and block private/loopback hosts.
+        validated_base_url = _validate_base_url(
+            base_url,
+            allowed=frozenset({base_url.rstrip("/")}),
+            label="voice.transcribe (custom)",
+        )
     return {
         "provider_id": provider_id,
         "provider_kind": provider_kind,
-        "base_url": base_url,
+        "base_url": validated_base_url,
         "secret_value": secret_value,
     }
 
