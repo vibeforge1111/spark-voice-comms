@@ -116,7 +116,11 @@ class _PublicHookInputError(ValueError):
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError as exc:
+        profile_summary = {"profile_name": "unknown", "tone_identity": "unknown", "default_emotion": "unknown", "barge_in_enabled": False, "streaming_reply_default": False, "provider_voice_ids": []}
+        status["reason"] = f"{status.get("reason", "voice status error")}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
@@ -180,7 +184,10 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError:
+        profile_summary = {"profile_name": "unknown", "tone_identity": "unknown", "default_emotion": "unknown", "barge_in_enabled": False, "streaming_reply_default": False, "provider_voice_ids": []}
     reply_text = (
         "Telegram voice plan:\n"
         "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
@@ -746,7 +753,11 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile = load_voice_profile()
+    try:
+        profile = load_voice_profile()
+    except RuntimeError as exc:
+        profile = {"profile_name": "unknown", "provider_voices": {}}
+    
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
     synthesize_started = time.perf_counter()
