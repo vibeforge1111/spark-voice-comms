@@ -192,7 +192,7 @@ def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
         "model_id": _optional_string(tts.get("model_id")),
         "mime_type": _optional_string(tts.get("mime_type")),
         "voice_compatible": bool(tts.get("voice_compatible")),
-        "audio_bytes": int(tts.get("audio_bytes") or 0),
+        "audio_bytes": _nonnegative_int(tts.get("audio_bytes")),
         "settings_fingerprint": fingerprint(settings),
         "last_probe_ref": _optional_string(tts.get("last_probe_ref")),
         "claim_boundary": str(tts.get("claim_boundary") or "Synthesis readiness is not Telegram delivery proof."),
