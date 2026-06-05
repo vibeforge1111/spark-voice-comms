@@ -1928,7 +1928,8 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            raw = response.read(5 * 1024 * 1024)  # 5 MiB cap
+            payload = json.loads(raw.decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning(
             "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
