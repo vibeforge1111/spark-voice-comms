@@ -24,6 +24,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_whisper_model_cache: dict[str, Any] = {}
+
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
 
@@ -2057,7 +2059,10 @@ def _transcribe_with_local_faster_whisper(
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(audio_bytes)
             temp_path = handle.name
-        model = WhisperModel(_resolve_local_faster_whisper_model(payload), device="cpu", compute_type="int8")
+        model_size = _resolve_local_faster_whisper_model(payload)
+        if model_size not in _whisper_model_cache:
+            _whisper_model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
+        model = _whisper_model_cache[model_size]
         transcribe_kwargs: dict[str, Any] = {
             "beam_size": _resolve_local_faster_whisper_beam_size(payload),
             "condition_on_previous_text": False,
