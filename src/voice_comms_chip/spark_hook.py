@@ -2079,6 +2079,19 @@ def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
             return True
         if configured in {"0", "false", "no", "off"}:
             return False
+        if configured:
+            # Surface the silent fall-through to the default. Without this
+            # warn line, an operator who set VOICE_TRANSCRIBE_LOCAL_VAD_FILTER=disabled
+            # (or "off-now", or any truthy-looking unrecognized value) sees
+            # voice transcription behave as if the flag was unset. Mirrors
+            # the warning style already used by _resolve_local_faster_whisper_beam_size
+            # in this same module for the same flavor of invalid value.
+            import sys as _sys
+            _sys.stderr.write(
+                f"[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_VAD_FILTER: "
+                f"configured value {configured!r} is not a supported truthy/falsy token; "
+                f"using default vad_filter=True. Supported: 1, true, yes, on (or) 0, false, no, off.\n"
+            )
     return True
 
 
