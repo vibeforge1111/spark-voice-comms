@@ -2203,13 +2203,15 @@ def _write_output(path: Path, payload: dict[str, Any]) -> None:
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(path)
     finally:
-        if tmp.exists():
+        try:
             try:
                 tmp.unlink()
             except OSError:
                 pass
 
 
+        except FileNotFoundError:
+            pass
 def _hook_input_limit_bytes(hook: str) -> int:
     if hook == "voice.transcribe":
         max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
