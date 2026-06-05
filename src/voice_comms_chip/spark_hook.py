@@ -1709,6 +1709,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            detail = _sanitize_error_detail(detail)
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -2158,7 +2159,8 @@ def _post_multipart(
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        detail = exc.read().decode('utf-8', errors='replace')
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {_sanitize_error_detail(detail)}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
@@ -2181,6 +2183,21 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _sanitize_error_detail(detail: str, *, max_len: int = 200) -> str:
+    """Truncate error detail and strip embedded IPs/hostnames to prevent info leakage."""
+    import re as _re
+
+    if not detail:
+        return detail
+    sanitized = _re.sub(
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "[redacted-ip]", detail
+    )
+    sanitized = _re.sub(
+        r"\blocalhost\b", "[redacted-host]", sanitized, flags=_re.IGNORECASE
+    )
+    return sanitized[:max_len]
 
 
 def _join_url(base_url: str, suffix: str) -> str:
