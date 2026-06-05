@@ -1726,10 +1726,11 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
         pyttsx3 = importlib.import_module("pyttsx3")
     except ImportError as exc:
         raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
+    temp_dir = None
     temp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
-            temp_path = handle.name
+        temp_dir = tempfile.mkdtemp(prefix="spark-tts-")
+        temp_path = os.path.join(temp_dir, "output.wav")
         engine = pyttsx3.init()
         rate = request.get("rate")
         if rate is not None:
@@ -1752,9 +1753,10 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
             raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
         return audio_bytes, str(request.get("voice_id") or "local-system-voice")
     finally:
-        if temp_path:
+        if temp_dir:
+            import shutil
             try:
-                os.unlink(temp_path)
+                shutil.rmtree(temp_dir)
             except OSError:
                 pass
 
