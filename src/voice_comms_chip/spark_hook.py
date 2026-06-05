@@ -142,6 +142,11 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
             "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
             f"Current state: {status['reason']}",
         ]
+        tts_status = str(status.get("speech_reply_status") or "").strip()
+        if tts_status:
+            lines.append(f"Speech replies: {tts_status}.")
+        elif not status.get("local_ready"):
+            lines.append("Speech replies: not configured.")
         lines.append(
             f"Voice profile: {profile_summary['profile_name']} "
             f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
