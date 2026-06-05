@@ -2198,9 +2198,13 @@ def _join_url(base_url: str, suffix: str) -> str:
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    fd, tmp_path_str = tempfile.mkstemp(dir=str(path.parent), suffix=path.suffix + ".tmp")
+    tmp = Path(tmp_path_str)
     try:
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         tmp.replace(path)
     finally:
         if tmp.exists():
