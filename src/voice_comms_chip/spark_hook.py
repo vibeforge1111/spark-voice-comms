@@ -75,6 +75,7 @@ MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
+MAX_TTS_TEXT_LENGTH = 50000
 VOICE_ENV_KEYS = {
     "OPENAI_API_KEY",
     "VOICE_TRANSCRIBE_PROVIDER",
@@ -1480,6 +1481,10 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     text = str(payload.get("text") or "").strip()
     if not text:
         raise ValueError("voice.speak requires non-empty text.")
+    if len(text) > MAX_TTS_TEXT_LENGTH:
+        raise ValueError(
+            f"voice.speak text exceeds maximum length of {MAX_TTS_TEXT_LENGTH} characters (got {len(text)})."
+        )
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
