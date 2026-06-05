@@ -1542,11 +1542,11 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         "file_extension": file_extension,
         "voice_compatible": voice_compatible,
         "voice_settings": {
-            "stability": provided_voice_settings.get("stability", 0.92),
-            "similarity_boost": provided_voice_settings.get("similarity_boost", 0.78),
-            "style": provided_voice_settings.get("style", 0.03),
+            "stability": max(0.0, min(1.0, provided_voice_settings.get("stability", 0.92))),
+            "similarity_boost": max(0.0, min(1.0, provided_voice_settings.get("similarity_boost", 0.78))),
+            "style": max(0.0, min(1.0, provided_voice_settings.get("style", 0.03))),
             "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
-            "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
+            "speed": max(0.5, min(2.0, provided_voice_settings.get("speed", speech.get("default_rate", 1.0)))),
         },
     }
 
