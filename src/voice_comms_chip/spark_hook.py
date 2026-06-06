@@ -2399,7 +2399,11 @@ def main() -> int:
 
     _export_runtime_state_if_configured(result)
     _write_output(Path(args.output), result)
-    return 0
+    try:
+        result_returncode = int(result.get("returncode", 0)) if isinstance(result, dict) else 0
+    except (TypeError, ValueError):
+        result_returncode = 0
+    return 1 if result_returncode != 0 else 0
 
 
 if __name__ == "__main__":
