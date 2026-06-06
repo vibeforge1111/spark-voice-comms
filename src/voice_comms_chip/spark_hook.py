@@ -114,6 +114,56 @@ class _PublicHookInputError(ValueError):
         self.error_code = error_code
 
 
+def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
+    """Verify a native voice hook is bound to a Governor decision and tool ledger."""
+    authority = (
+        payload.get("governor_decision")
+        or payload.get("governorDecision")
+        or payload.get("execution_authority")
+        or payload.get("executionAuthority")
+    )
+    if not isinstance(authority, dict):
+        raise ValueError(f"{hook} requires Harness Core Governor authority.")
+    if authority.get("schema_version") != "governor-decision-v1":
+        raise ValueError(f"{hook} requires a governor-decision-v1 authority envelope.")
+    if authority.get("outcome") not in {"execute", "read_only"}:
+        raise ValueError(f"{hook} requires an executable Governor decision.")
+
+    envelope = authority.get("envelope") if isinstance(authority.get("envelope"), dict) else {}
+    actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
+    ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
+    authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
+            continue
+        action_id = str(action.get("action_id") or "").strip()
+        if not action_id:
+            continue
+        auth_ok = any(
+            isinstance(item, dict)
+            and item.get("verdict") == "allow"
+            and str(item.get("action_id") or "").strip() == action_id
+            for item in authorizations
+        )
+        ledger_ok = any(
+            isinstance(item, dict)
+            and str(item.get("tool_name") or "").strip() == hook
+            and str(item.get("action_id") or "").strip() == action_id
+            and (
+                (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
+                or auth_ok
+            )
+            for item in ledgers
+        )
+        if auth_ok and ledger_ok:
+            return authority
+
+    raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
@@ -263,6 +313,7 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
     target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
@@ -746,6 +797,7 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
@@ -808,6 +860,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.transcribe")
     transcribe_started = time.perf_counter()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
     if not audio_base64:

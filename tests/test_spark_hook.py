@@ -16,6 +16,7 @@ from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
     _join_url,
     _write_output,
+    assertNativeGovernorHarnessAuthority,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
@@ -50,6 +51,11 @@ def _payload(tmp_path, **overrides):
     env_file.write_text(f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\n", encoding="utf-8")
     payload = {
         "builder_env_file_path": str(env_file),
+        "governor_decision": _voice_governor_decision(
+            "voice.install",
+            "voice.transcribe",
+            "voice.speak",
+        ),
         "provider": {
             "provider_id": "openai",
             "provider_kind": "openai",
@@ -85,6 +91,60 @@ def test_read_env_map_strips_matching_outer_quotes(tmp_path):
         "UNMATCHED": '"keep-leading-quote',
         "INNER_QUOTES": 'prefix"inner"suffix',
     }
+
+
+def _voice_governor_decision(*hooks: str) -> dict[str, object]:
+    actions = []
+    authorizations = []
+    ledgers = []
+    for hook in hooks:
+        action_id = f"action:{hook}"
+        authorization = {
+            "schema_version": "authorization-decision-v1",
+            "decision_id": f"auth:{hook}",
+            "verdict": "allow",
+            "action_id": action_id,
+            "capability_id": hook,
+            "turn_id": "turn:voice-test",
+        }
+        actions.append(
+            {
+                "action_id": action_id,
+                "capability_id": hook,
+                "tool_name": hook,
+                "action_type": "local_install_or_network_voice",
+            }
+        )
+        authorizations.append(authorization)
+        ledgers.append(
+            {
+                "schema_version": "tool-call-ledger-v1",
+                "ledger_id": f"ledger:{hook}",
+                "tool_name": hook,
+                "capability_id": hook,
+                "action_id": action_id,
+                "turn_id": "turn:voice-test",
+                "authorization": authorization,
+                "result": {"status": "not_started"},
+            }
+        )
+    return {
+        "schema_version": "governor-decision-v1",
+        "decision_id": "governor:voice-test",
+        "turn_id": "turn:voice-test",
+        "outcome": "execute",
+        "envelope": {
+            "schema_version": "turn-intent-envelope-vnext",
+            "turn_id": "turn:voice-test",
+            "proposed_actions": actions,
+        },
+        "authorizations": authorizations,
+        "tool_ledgers": ledgers,
+    }
+
+
+def _authorized_voice_payload(hook: str, payload: dict[str, object]) -> dict[str, object]:
+    return {**payload, "governor_decision": _voice_governor_decision(hook)}
 
 
 def test_voice_status_default_requires_local_faster_whisper(tmp_path):
@@ -224,6 +284,27 @@ def test_voice_plan_returns_modular_steps():
     assert "spark-voice-comms" in result["result"]["reply_text"]
 
 
+def test_voice_authority_requires_matching_tool_ledger():
+    payload = {"governor_decision": _voice_governor_decision("voice.speak")}
+
+    authority = assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
+
+    assert authority["decision_id"] == "governor:voice-test"
+
+
+def test_voice_authority_rejects_missing_governor_decision():
+    with pytest.raises(ValueError, match="requires Harness Core Governor authority"):
+        assertNativeGovernorHarnessAuthority({}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_tampered_tool_ledger():
+    decision = _voice_governor_decision("voice.speak")
+    decision["tool_ledgers"][0]["action_id"] = "action:other"
+
+    with pytest.raises(ValueError, match="matching Harness Core authorization and tool ledger"):
+        assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
 def test_voice_onboard_guides_local_free_path():
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
         "voice_comms_chip.spark_hook._local_pyttsx3_available",
@@ -327,7 +408,7 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         side_effect=[False, True, True],
     ), patch("voice_comms_chip.spark_hook.subprocess.run", side_effect=fake_run):
-        result = handle_voice_install_hook({"target": "kokoro"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "kokoro"}))
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -349,7 +430,7 @@ def test_voice_install_kokoro_skips_pip_when_already_installed():
     ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
-        result = handle_voice_install_hook({"target": "kokoro"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "kokoro"}))
 
     assert result["returncode"] == 0
     assert result["stdout"] == "already_installed"
@@ -377,7 +458,7 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     ), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
-        result = handle_voice_install_hook({"target": "kokoro"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "kokoro"}))
 
     assert result["returncode"] == 0
     assert result["result"]["kokoro_ready"] is True
@@ -402,7 +483,7 @@ def test_voice_install_faster_whisper_runs_local_pip_when_missing():
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
-        result = handle_voice_install_hook({"target": "faster-whisper"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "faster-whisper"}))
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -419,7 +500,7 @@ def test_voice_install_kokoro_reports_unsupported_python_runtime():
     with patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=message), patch(
         "voice_comms_chip.spark_hook.subprocess.run",
     ) as run:
-        result = handle_voice_install_hook({"target": "kokoro"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "kokoro"}))
 
     encoded = json.dumps(result)
     assert result["returncode"] == 1
@@ -457,7 +538,7 @@ def test_voice_install_local_stack_installs_stt_and_kokoro_packages():
         "voice_comms_chip.spark_hook.subprocess.run",
         side_effect=fake_run,
     ):
-        result = handle_voice_install_hook({"target": "local"})
+        result = handle_voice_install_hook(_authorized_voice_payload("voice.install", {"target": "local"}))
 
     assert result["returncode"] == 0
     assert result["result"]["installed"] is True
@@ -776,7 +857,12 @@ def test_cli_main_returns_bounded_error_for_malformed_audio_base64(tmp_path):
     output_path = tmp_path / "output.json"
     raw_payload = "!!!!/tmp/private-audio.ogg/sk-live-secret"
     input_path.write_text(
-        json.dumps({"audio_base64": raw_payload, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"}),
+        json.dumps(
+            _authorized_voice_payload(
+                "voice.transcribe",
+                {"audio_base64": raw_payload, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"},
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -832,7 +918,12 @@ def test_cli_main_returns_bounded_error_for_oversized_audio(tmp_path):
     output_path = tmp_path / "output.json"
     audio_base64 = base64.b64encode(b"fake-ogg-bytes").decode("ascii")
     input_path.write_text(
-        json.dumps({"audio_base64": audio_base64, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"}),
+        json.dumps(
+            _authorized_voice_payload(
+                "voice.transcribe",
+                {"audio_base64": audio_base64, "filename": "telegram-voice.ogg", "mime_type": "audio/ogg"},
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -1020,7 +1111,7 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
 
     with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
         result = handle_voice_transcribe_hook(
-            {
+            _authorized_voice_payload("voice.transcribe", {
                 "builder_env_file_path": str(env_file),
                 "provider": {
                     "provider_id": "custom",
@@ -1033,7 +1124,7 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
                 "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
                 "filename": "telegram-voice.ogg",
                 "mime_type": "audio/ogg",
-            }
+            })
         )
 
     headers = {str(key).lower(): value for key, value in captured["headers"].items()}
@@ -1071,10 +1162,10 @@ def test_voice_speak_uses_profile_default_elevenlabs_voice(tmp_path):
 
     with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
                 "text": "Operator status update.",
-            }
+            })
         )
 
     headers = {str(key).lower(): value for key, value in captured["headers"].items()}
@@ -1120,7 +1211,7 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
 
     with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
                 "surface": "telegram",
                 "text": "Telegram voice note reply.",
@@ -1129,7 +1220,7 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
                     "status": "success",
                     "telegram_message_id": 12345,
                 },
-            }
+            })
         )
 
     headers = {str(key).lower(): value for key, value in captured["headers"].items()}
@@ -1189,7 +1280,7 @@ def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
 
     with patch.dict(sys.modules, {"pyttsx3": SimpleNamespace(init=lambda: FakeEngine())}):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "text": "Local free voice.",
                 "tts": {
                     "provider_id": "pyttsx3",
@@ -1197,7 +1288,7 @@ def test_voice_speak_supports_local_pyttsx3_tts(tmp_path):
                     "rate": 175,
                     "volume": 0.8,
                 },
-            }
+            })
         )
 
     assert result["returncode"] == 0
@@ -1237,7 +1328,7 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
         },
     ):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "text": "Kokoro local voice.",
                 "tts": {
                     "provider_id": "kokoro",
@@ -1247,7 +1338,7 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
                     "speed": 1.1,
                     "lang": "en-us",
                 },
-            }
+            })
         )
 
     assert result["returncode"] == 0
@@ -1297,10 +1388,10 @@ def test_voice_speak_uses_env_default_tts_provider_for_kokoro(tmp_path):
         },
     ):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
                 "text": "Env Kokoro voice.",
-            }
+            })
         )
 
     assert result["returncode"] == 0
@@ -1360,11 +1451,11 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
         {"websocket": SimpleNamespace(create_connection=fake_create_connection)},
     ):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
                 "surface": "telegram",
                 "text": "Use the new realtime voice.",
-            }
+            })
         )
 
     audio_bytes = base64.b64decode(result["result"]["audio_base64"].encode("ascii"))
@@ -1425,11 +1516,11 @@ def test_voice_speak_reports_malformed_openai_realtime_websocket_message(tmp_pat
     ):
         with pytest.raises(RuntimeError) as exc_info:
             handle_voice_speak_hook(
-                {
+                _authorized_voice_payload("voice.speak", {
                     "builder_env_file_path": str(env_file),
                     "surface": "telegram",
                     "text": "Use the new realtime voice.",
-                }
+                })
             )
 
     message = str(exc_info.value)
@@ -1481,10 +1572,10 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
 
     with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
-            {
+            _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
                 "text": "Retry the fallback voice.",
-            }
+            })
         )
 
     assert result["returncode"] == 0
