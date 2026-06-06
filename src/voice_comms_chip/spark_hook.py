@@ -1857,7 +1857,14 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        max_messages = 10000
+        message_count = 0
         while True:
+            message_count += 1
+            if message_count > max_messages:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS WebSocket exceeded {max_messages} messages without response.done — aborting to prevent DoS."
+                )
             raw_message = ws.recv()
             if not raw_message:
                 continue
