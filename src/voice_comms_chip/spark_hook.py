@@ -825,9 +825,10 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 filename=filename,
             )
         except Exception as exc:
+            logger.warning("Local faster-whisper transcription failed: %s", exc, exc_info=True)
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
-                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason="Transcription provider unavailable."),
                     payload=payload,
                     audio_bytes=len(audio_bytes),
                     started_at=transcribe_started,
@@ -867,9 +868,10 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             mime_type=mime_type,
         )
     except Exception as exc:
+        logger.warning("Hosted transcription provider failed: %s", exc, exc_info=True)
         if fallback_mode == "deterministic":
             return _with_transcribe_runtime_state(
-                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason="Transcription provider unavailable."),
                 payload=payload,
                 audio_bytes=len(audio_bytes),
                 started_at=transcribe_started,
