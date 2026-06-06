@@ -1826,9 +1826,19 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
         raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
     model_path = Path(raw_model_path)
     voices_path = Path(raw_voices_path)
-    if not model_path.exists():
+    if not model_path.is_file():
+        if model_path.exists():
+            raise RuntimeError(
+                f"Kokoro model_path '{model_path}' exists but is not a regular file. "
+                f"Set `{ENV_KOKORO_MODEL_PATH}` to the Kokoro .onnx model file path, not a directory."
+            )
         raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
-    if not voices_path.exists():
+    if not voices_path.is_file():
+        if voices_path.exists():
+            raise RuntimeError(
+                f"Kokoro voices_path '{voices_path}' exists but is not a regular file. "
+                f"Set `{ENV_KOKORO_VOICES_PATH}` to the Kokoro voices file path, not a directory."
+            )
         raise RuntimeError(f"Kokoro voices file was not found at '{voices_path}'.")
     kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
     samples, sample_rate = kokoro.create(
