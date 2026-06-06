@@ -2351,7 +2351,7 @@ def main() -> int:
             result = handle_voice_speak_hook(payload)
         else:
             result = handle_voice_transcribe_hook(payload)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
