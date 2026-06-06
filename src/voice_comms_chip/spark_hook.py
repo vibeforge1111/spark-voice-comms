@@ -2211,7 +2211,25 @@ def _post_multipart(
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        body = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 404:
+            raise RuntimeError(
+                f"Voice provider HTTP 404 (not found): {body}. "
+                "The configured transcription provider base URL or model does not exist at this endpoint. "
+                "Check the active VOICE_TRANSCRIBE base URL and model name; or set VOICE_TRANSCRIBE_PROVIDER=local to fall back to faster-whisper."
+            ) from exc
+        if exc.code in {401, 403}:
+            raise RuntimeError(
+                f"Voice provider HTTP {exc.code}: {body}. "
+                "The transcription provider rejected the API key. "
+                "Rotate the configured VOICE_TRANSCRIBE secret env ref in the active env and retry."
+            ) from exc
+        if exc.code == 429:
+            raise RuntimeError(
+                f"Voice provider HTTP 429 (rate limited): {body}. "
+                "The transcription provider throttled the request. Retry after a short delay, or set VOICE_TRANSCRIBE_PROVIDER=local to fall back to faster-whisper."
+            ) from exc
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {body}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
