@@ -854,6 +854,17 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 },
             }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
     if transcription_mode in {"auto", "local"}:
+        if fallback_mode == "deterministic":
+            return _with_transcribe_runtime_state(
+                _deterministic_transcribe_response(
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    reason="local faster-whisper not installed; deterministic fallback requested",
+                ),
+                payload=payload,
+                audio_bytes=len(audio_bytes),
+                started_at=transcribe_started,
+            )
         raise ValueError(
             "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
             "Install `spark-voice-comms[local-stt]`, or set VOICE_TRANSCRIBE_PROVIDER=openai to explicitly opt into hosted transcription."
