@@ -1511,6 +1511,10 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
     if not secret_env_ref:
         raise ValueError(_missing_voice_secret_message("voice.speak"))
+    if secret_env_ref not in VOICE_ENV_KEYS:
+        raise ValueError(
+            f"voice.speak secret_env_ref '{secret_env_ref}' is not in the permitted env-var allowlist."
+        )
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(_missing_voice_secret_message("voice.speak"))
