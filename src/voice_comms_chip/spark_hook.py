@@ -2344,8 +2344,16 @@ def main() -> int:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
-    _export_runtime_state_if_configured(result)
+    # The primary output contract is to always emit the hook result at args.output.
+    # Write it first so the optional runtime-state side channel can never suppress it.
     _write_output(Path(args.output), result)
+    try:
+        _export_runtime_state_if_configured(result)
+    except OSError as exc:
+        # The runtime-state export is a best-effort proof trail gated on
+        # SPARK_VOICE_RUNTIME_STATE_PATH. A failed/unwritable export must downgrade to a
+        # warning, not crash the hook or discard the already-written output envelope.
+        logger.warning("Failed to export runtime state side channel: %s", exc)
     return 0
 
 

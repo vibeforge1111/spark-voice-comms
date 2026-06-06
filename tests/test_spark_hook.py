@@ -668,6 +668,83 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert FAKE_OPENAI_KEY not in encoded
 
 
+def test_cli_main_export_failure_does_not_suppress_primary_output(tmp_path):
+    """A failed optional runtime-state export must never suppress the primary --output envelope.
+
+    The runtime-state export is an optional side channel gated on
+    SPARK_VOICE_RUNTIME_STATE_PATH. If that path cannot be created/written (here the
+    parent is a regular file, so mkdir raises NotADirectoryError), main() must still
+    write the already-successful hook result to --output and must not propagate the
+    OSError. Before the fix the export call ran outside the output-guarantee
+    try/except, so the exception escaped and --output was never written.
+    """
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+
+    # Parent of the export path is a regular file, so creating the export path is
+    # impossible: Path.parent.mkdir(...) raises NotADirectoryError.
+    blocker_file = tmp_path / "blocker"
+    blocker_file.write_text("not a directory", encoding="utf-8")
+    uncreatable_runtime_state_path = blocker_file / "sub" / "voice-runtime-state.json"
+
+    input_path.write_text('{"surface":"attachments_cli"}', encoding="utf-8")
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ), patch.dict(
+        "os.environ",
+        {"SPARK_VOICE_RUNTIME_STATE_PATH": str(uncreatable_runtime_state_path)},
+        clear=False,
+    ):
+        # Must not raise (NotADirectoryError is an OSError) even though the export fails.
+        exit_code = main()
+
+    # The optional export could not be written...
+    assert not uncreatable_runtime_state_path.exists()
+    # ...but the primary output envelope is preserved.
+    assert output_path.exists(), "primary --output envelope was suppressed by a failed export"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert payload["returncode"] == 0
+    assert payload["result"]["runtime_state"]["schema_version"] == "spark.voice_runtime_state.v1"
+
+
+def test_cli_main_without_runtime_state_env_unchanged(tmp_path, monkeypatch):
+    """Without SPARK_VOICE_RUNTIME_STATE_PATH set, behavior is unchanged."""
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    input_path.write_text('{"surface":"attachments_cli"}', encoding="utf-8")
+    monkeypatch.delenv("SPARK_VOICE_RUNTIME_STATE_PATH", raising=False)
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.object(
+        sys,
+        "argv",
+        [
+            "spark_hook",
+            "voice.status",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    ):
+        exit_code = main()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert payload["returncode"] == 0
+    assert payload["result"]["runtime_state"]["schema_version"] == "spark.voice_runtime_state.v1"
+
+
 def test_join_url_accepts_http_urls_and_trims_edges():
     assert _join_url(" https://voice.example.test/api/ ", " /v1/speak ") == "https://voice.example.test/api/v1/speak"
 
