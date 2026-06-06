@@ -116,7 +116,11 @@ class _PublicHookInputError(ValueError):
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError as exc:
+        profile_summary = {"profile_name": "unknown", "tone_identity": "unknown", "default_emotion": "unknown", "barge_in_enabled": False, "streaming_reply_default": False, "provider_voice_ids": []}
+        status["reason"] = f"{status.get("reason", "voice status error")}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
@@ -180,7 +184,10 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError:
+        profile_summary = {"profile_name": "unknown", "tone_identity": "unknown", "default_emotion": "unknown", "barge_in_enabled": False, "streaming_reply_default": False, "provider_voice_ids": []}
     reply_text = (
         "Telegram voice plan:\n"
         "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
@@ -746,7 +753,11 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile = load_voice_profile()
+    try:
+        profile = load_voice_profile()
+    except RuntimeError as exc:
+        profile = {"profile_name": "unknown", "provider_voices": {}}
+    
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
     synthesize_started = time.perf_counter()
@@ -824,7 +835,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 audio_bytes=audio_bytes,
                 filename=filename,
             )
-        except Exception as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
                     _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
@@ -866,7 +877,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             filename=filename,
             mime_type=mime_type,
         )
-    except Exception as exc:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, RuntimeError) as exc:
         if fallback_mode == "deterministic":
             return _with_transcribe_runtime_state(
                 _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
@@ -1066,7 +1077,7 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
-        except Exception as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             env_note = f"Builder env file unavailable: {exc}"
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
@@ -2340,7 +2351,7 @@ def main() -> int:
             result = handle_voice_speak_hook(payload)
         else:
             result = handle_voice_transcribe_hook(payload)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
