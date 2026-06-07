@@ -1716,13 +1716,17 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
 
 
 def _resolve_optional_float(value: Any) -> float | None:
+    import math
     text = str(value or "").strip()
     if not text:
         return None
     try:
-        return float(text)
-    except ValueError:
+        result = float(text)
+    except (ValueError, OverflowError):
         return None
+    if not math.isfinite(result):
+        return None
+    return result
 
 
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
