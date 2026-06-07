@@ -36,6 +36,10 @@ LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
 OPENAI_REALTIME_TTS_PROVIDER = "openai-realtime"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
+ALLOWED_VOICE_HOSTS = frozenset({
+    "api.elevenlabs.io",
+    "api.openai.com",
+})
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64"
@@ -1955,10 +1959,23 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
 
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+    # Validate host against allow-list before normalising scheme, to prevent
+    # SSRF via attacker-controlled env vars (e.g. VOICE_TTS_OPENAI_REALTIME_WS_URL).
+    check_url = normalized
+    if check_url.startswith("ws://"):
+        check_url = "http://" + check_url[len("ws://"):]
+    elif check_url.startswith("wss://"):
+        check_url = "https://" + check_url[len("wss://"):]
+    parsed = urllib.parse.urlparse(check_url)
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in ALLOWED_VOICE_HOSTS:
+        raise ValueError(
+            f"openai_realtime_ws_url host {hostname!r} is not in the allowed voice hosts list"
+        )
     if normalized.startswith("http://"):
-        normalized = "ws://" + normalized[len("http://") :]
+        normalized = "ws://" + normalized[len("http://"):]
     elif normalized.startswith("https://"):
-        normalized = "wss://" + normalized[len("https://") :]
+        normalized = "wss://" + normalized[len("https://"):]
     if not normalized.endswith("/realtime"):
         normalized = f"{normalized}/realtime"
     return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"

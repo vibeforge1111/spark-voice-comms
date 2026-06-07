@@ -15,6 +15,7 @@ import pytest
 from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
     _join_url,
+    _openai_realtime_ws_url,
     _write_output,
     assertNativeGovernorHarnessAuthority,
     handle_voice_install_hook,
@@ -1582,3 +1583,32 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+@pytest.mark.parametrize("malicious_url", [
+    "wss://169.254.169.254/latest/meta-data/",
+    "wss://internal-service:8080/v1/realtime",
+    "wss://evil.attacker.com/v1/realtime",
+    "ws://localhost/v1/realtime",
+    "wss://127.0.0.1/v1/realtime",
+    "https://169.254.169.254/v1/realtime",
+])
+def test_openai_realtime_ws_url_rejects_hosts_not_in_allowlist(malicious_url):
+    with pytest.raises(ValueError, match="not in the allowed voice hosts list"):
+        _openai_realtime_ws_url(malicious_url, model_id="gpt-realtime-2")
+
+
+@pytest.mark.parametrize("safe_url", [
+    "wss://api.openai.com/v1/realtime",
+    "https://api.openai.com/v1/realtime",
+    "http://api.openai.com/v1/realtime",
+])
+def test_openai_realtime_ws_url_accepts_allowed_hosts(safe_url):
+    result = _openai_realtime_ws_url(safe_url, model_id="gpt-realtime-2")
+    assert "api.openai.com" in result
+    assert "model=gpt-realtime-2" in result
+
+
+def test_openai_realtime_ws_url_defaults_when_base_url_empty():
+    result = _openai_realtime_ws_url("", model_id="gpt-realtime-2")
+    assert "api.openai.com" in result
