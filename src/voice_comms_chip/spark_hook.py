@@ -928,11 +928,18 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 started_at=transcribe_started,
             )
         if _local_faster_whisper_available():
-            transcript_text = _transcribe_with_local_faster_whisper(
-                payload=payload,
-                audio_bytes=audio_bytes,
-                filename=filename,
-            )
+            try:
+                transcript_text = _transcribe_with_local_faster_whisper(
+                    payload=payload,
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                )
+            except Exception as local_exc:
+                raise RuntimeError(
+                    "Both hosted transcription and local faster-whisper fallback failed. "
+                    f"Hosted provider error: {exc!r}; "
+                    f"Local fallback error: {local_exc!r}"
+                ) from local_exc
             return _with_transcribe_runtime_state({
                 "returncode": 0,
                 "stdout": transcript_text,
