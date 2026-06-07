@@ -1725,7 +1725,16 @@ def _resolve_optional_float(value: Any) -> float | None:
         return None
 
 
+_ELEVENLABS_ALLOWED_HOSTS: frozenset[str] = frozenset({"api.elevenlabs.io"})
+
+
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    _el_parsed = urllib.parse.urlparse(str(request.get("base_url") or ""))
+    if _el_parsed.scheme not in {"https"} or (_el_parsed.hostname or "").lower() not in _ELEVENLABS_ALLOWED_HOSTS:
+        raise ValueError(
+            f"ElevenLabs base_url hostname '{_el_parsed.hostname}' is not in the permitted "
+            "allowlist. Only api.elevenlabs.io over https is allowed."
+        )
     voice_id = str(request["voice_id"]).strip()
     if not voice_id:
         raise ValueError(
