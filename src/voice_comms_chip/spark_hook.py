@@ -165,6 +165,7 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.status")
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
@@ -230,6 +231,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.plan")
     profile_summary = summarize_voice_profile(load_voice_profile())
     reply_text = (
         "Telegram voice plan:\n"
@@ -256,6 +258,7 @@ def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.onboard")
     snapshot = _build_onboarding_snapshot(payload)
     route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
     provider_note = _voice_provider_note(payload)
