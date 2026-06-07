@@ -1950,6 +1950,8 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
         return ("audio/ogg", ".ogg", True)
     if normalized.startswith("pcm"):
         return ("audio/wav", ".wav", False)
+    if "ulaw" in normalized or "mu-law" in normalized or "mulaw" in normalized:
+        return ("audio/basic", ".ulaw", False)
     return ("audio/mpeg", ".mp3", False)
 
 
