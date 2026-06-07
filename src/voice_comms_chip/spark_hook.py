@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1730,6 +1731,10 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
     if not voice_id:
         raise ValueError(
             f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
+        )
+    if not re.fullmatch(r'[a-zA-Z0-9\-]+', voice_id):
+        raise ValueError(
+            f"voice_id contains invalid characters. Only alphanumeric characters and hyphens are allowed, got '{voice_id}'."
         )
     retried_with_fallback = False
     while True:
