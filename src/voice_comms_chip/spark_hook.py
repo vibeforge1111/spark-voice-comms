@@ -2236,6 +2236,40 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     return ""
 
 
+def _is_safe_url(url: str) -> bool:
+    """Reject URLs targeting private/internal/metadata IP ranges (SSRF guard)."""
+    import ipaddress
+
+    parsed = urllib.parse.urlparse(url)
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False
+
+    # Block well-known local / metadata hostnames
+    _BLOCKED_HOSTNAMES = {
+        "localhost",
+        "metadata.google.internal",
+        "metadata.google.com",
+        "instance-data",
+    }
+    if hostname in _BLOCKED_HOSTNAMES:
+        return False
+
+    # Try to parse as an IP address and reject private / reserved ranges
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # hostname is a DNS name — allow it (DNS resolution is not checked here)
+        return True
+
+    if addr.is_loopback or addr.is_link_local or addr.is_private or addr.is_reserved:
+        return False
+    # Explicitly block the AWS/GCP metadata endpoint
+    if addr == ipaddress.IPv4Address("169.254.169.254"):
+        return False
+    return True
+
+
 def _join_url(base_url: str, suffix: str) -> str:
     """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
     if not isinstance(base_url, str) or not base_url.strip():
@@ -2246,6 +2280,10 @@ def _join_url(base_url: str, suffix: str) -> str:
     parsed = urllib.parse.urlparse(clean_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
+    if not _is_safe_url(clean_base):
+        raise ValueError(
+            "base_url must not target a private, loopback, link-local, or metadata endpoint"
+        )
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
