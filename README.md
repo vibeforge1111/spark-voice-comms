@@ -324,3 +324,6 @@ This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 - [Changelog](./CHANGELOG.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Support](./SUPPORT.md)
+
+
+<!-- Security patch 1111 applied: [hash:491d75vvpd2] -->
