@@ -2109,6 +2109,8 @@ def _transcribe_with_provider(
 def _reject_multipart_crlf(label: str, value: str) -> None:
     if "\r" in value or "\n" in value:
         raise ValueError(f"{label} must not contain CR or LF characters")
+    if '"' in value:
+        raise ValueError(f"{label} must not contain double-quote characters")
 
 
 def _post_multipart(
