@@ -2070,15 +2070,44 @@ def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | Non
     return None
 
 
+def _str_bool(value: str, *, default: bool = False) -> bool:
+    """Convert a string value to a boolean.
+
+    Recognises common truthy/falsy string representations:
+      truthy: "1", "true", "yes", "on"
+      falsy:  "0", "false", "no", "off", ""
+
+    IMPORTANT: the numeric string ``"0"`` is intentionally mapped to
+    ``False`` so that boolean env-var flags like ``VOICE_TRANSCRIBE_LOCAL_VAD_FILTER=0``
+    behave the same as ``false`` / ``no`` / ``off``.
+
+    Callers that receive status *codes* (where ``0`` may be a valid
+    non-falsy value) should **not** use this function; compare against
+    explicit int values or specific code ranges instead.
+
+    Args:
+        value: The string to convert.  Leading/trailing whitespace is
+            stripped and comparison is case-insensitive.
+        default: The boolean to return when *value* is not a recognised
+            truthy/falsy token.
+
+    Returns:
+        The interpreted boolean, or *default* for unrecognised values.
+    """
+    normalised = value.strip().lower()
+    if normalised in {"1", "true", "yes", "on"}:
+        return True
+    if normalised in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
         env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
-        if configured in {"1", "true", "yes", "on"}:
-            return True
-        if configured in {"0", "false", "no", "off"}:
-            return False
+        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "")
+        return _str_bool(configured, default=True)
     return True
 
 
