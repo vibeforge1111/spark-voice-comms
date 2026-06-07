@@ -1761,7 +1761,8 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            with exc:
+                detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -2211,7 +2212,8 @@ def _post_multipart(
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        with exc:
+            raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
