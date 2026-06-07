@@ -2300,10 +2300,10 @@ def _hook_error_payload(exc: Exception) -> dict[str, Any]:
         "metrics": {},
         "result": {},
         "error": detail,
+        "error_type": type(exc).__name__,
     }
     if error_code:
         payload["error_code"] = error_code
-        payload["error_type"] = exc.__class__.__name__
         payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
     return payload
 
