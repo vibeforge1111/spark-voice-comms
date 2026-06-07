@@ -314,8 +314,8 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
     assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
-    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
-    target = target.replace("_", "-")
+    raw_target = str(payload.get("target") or payload.get("provider") or "kokoro").strip()
+    target = raw_target.lower().replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
     if target in {"stt", "local-stt", "transcription", "transcribe", "whisper", "faster-whisper"}:
@@ -323,7 +323,12 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
     if target in {"local-tts", "kokoro-onnx"}:
         target = LOCAL_KOKORO_TTS_PROVIDER
     if target != LOCAL_KOKORO_TTS_PROVIDER:
-        raise ValueError("voice.install supports `kokoro`, `faster-whisper`, or `local`.")
+        raise ValueError(
+            f"voice.install does not recognize target {raw_target!r}. "
+            "Supported targets: `kokoro` (aliases: `local-tts`, `kokoro-onnx`), "
+            "`faster-whisper` (aliases: `stt`, `local-stt`, `transcription`, `transcribe`, `whisper`), "
+            "or `local` (aliases: `local-voice`, `local-stack`, `local-voice-stack`)."
+        )
     return _install_kokoro(payload)
 
 
