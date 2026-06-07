@@ -290,7 +290,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
             return {
                 "returncode": 1,
                 "stdout": "kokoro install failed",
-                "stderr": "\n".join(pip_tail),
+                "stderr": "Package install failed",
                 "metrics": {"installed": 0, "already_installed": 0},
                 "result": {
                     "reply_text": (
