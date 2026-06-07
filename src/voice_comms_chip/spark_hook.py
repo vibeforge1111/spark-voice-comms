@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import importlib
 import importlib.util
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -19,6 +21,8 @@ import wave
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
@@ -66,6 +70,9 @@ ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFO
 ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
+MAX_HOOK_INPUT_BYTES = 1_000_000
+MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
+MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -99,6 +106,62 @@ VOICE_ENV_KEYS = {
     ENV_OPENAI_REALTIME_INSTRUCTIONS,
     ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
 }
+
+
+class _PublicHookInputError(ValueError):
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
+    """Verify a native voice hook is bound to a Governor decision and tool ledger."""
+    authority = (
+        payload.get("governor_decision")
+        or payload.get("governorDecision")
+        or payload.get("execution_authority")
+        or payload.get("executionAuthority")
+    )
+    if not isinstance(authority, dict):
+        raise ValueError(f"{hook} requires Harness Core Governor authority.")
+    if authority.get("schema_version") != "governor-decision-v1":
+        raise ValueError(f"{hook} requires a governor-decision-v1 authority envelope.")
+    if authority.get("outcome") not in {"execute", "read_only"}:
+        raise ValueError(f"{hook} requires an executable Governor decision.")
+
+    envelope = authority.get("envelope") if isinstance(authority.get("envelope"), dict) else {}
+    actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
+    ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
+    authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
+            continue
+        action_id = str(action.get("action_id") or "").strip()
+        if not action_id:
+            continue
+        auth_ok = any(
+            isinstance(item, dict)
+            and item.get("verdict") == "allow"
+            and str(item.get("action_id") or "").strip() == action_id
+            for item in authorizations
+        )
+        ledger_ok = any(
+            isinstance(item, dict)
+            and str(item.get("tool_name") or "").strip() == hook
+            and str(item.get("action_id") or "").strip() == action_id
+            and (
+                (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
+                or auth_ok
+            )
+            for item in ledgers
+        )
+        if auth_ok and ledger_ok:
+            return authority
+
+    raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +313,7 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
     target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
     target = target.replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
@@ -265,8 +329,28 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
     target = LOCAL_KOKORO_TTS_PROVIDER
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime.")
+    if _kokoro_python_unsupported_message():
+        return {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Kokoro install is not supported in this Python runtime.",
+            "error": "Kokoro install is not supported in this Python runtime.",
+            "error_code": "voice_install_unsupported_runtime",
+            "metrics": {"installed": 0, "already_installed": 0},
+            "result": {
+                "reply_text": (
+                    "Kokoro install cannot run in this Python runtime.\n"
+                    "Next: run Spark voice install from a Python 3.10-3.13 runtime, then retry `/voice install kokoro`."
+                ),
+                "target": target,
+                "python": _python_runtime_label(),
+                "installed": False,
+                "already_installed": False,
+                "kokoro_ready": False,
+                "pip_tail": [],
+                "error_code": "voice_install_unsupported_runtime",
+            },
+        }
     was_ready = _local_kokoro_package_available()
     if was_ready:
         install_status = "already_installed"
@@ -501,7 +585,7 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         return _process_voice_env_map()
 
 
@@ -713,6 +797,7 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
     profile = load_voice_profile()
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
@@ -723,8 +808,13 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
         audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
     elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
-    else:
+    elif request["provider_id"] == DEFAULT_TTS_PROVIDER:
         audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+    else:
+        raise RuntimeError(
+            "voice.speak resolved an unsupported TTS provider after request validation. "
+            "This is an internal routing bug."
+        )
     synthesize_ms = _elapsed_ms(synthesize_started)
     runtime_payload = {
         **payload,
@@ -770,11 +860,12 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.transcribe")
     transcribe_started = time.perf_counter()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
     if not audio_base64:
         raise ValueError("voice.transcribe requires audio_base64.")
-    audio_bytes = base64.b64decode(audio_base64.encode("ascii"))
+    audio_bytes = _decode_transcribe_audio_base64(audio_base64)
     filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
     fallback_mode = _resolve_fallback_mode(payload)
@@ -787,6 +878,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 filename=filename,
             )
         except Exception as exc:
+            import logging as _log; _log.getLogger(__name__).warning("Suppressed: %s", _e, exc_info=True)
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
                     _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
@@ -877,13 +969,40 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
 
 
+def _decode_transcribe_audio_base64(audio_base64: str) -> bytes:
+    max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+    if len(audio_base64) > max_base64_chars:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_too_large",
+            "voice.transcribe audio_base64 is too large.",
+        )
+    try:
+        audio_bytes = base64.b64decode(audio_base64.encode("ascii"), validate=True)
+    except (binascii.Error, UnicodeEncodeError) as exc:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_invalid_base64",
+            "voice.transcribe audio_base64 must be valid base64 audio bytes.",
+        ) from exc
+    if not audio_bytes:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_empty",
+            "voice.transcribe audio_base64 decoded to empty audio bytes.",
+        )
+    if len(audio_bytes) > MAX_TRANSCRIBE_AUDIO_BYTES:
+        raise _PublicHookInputError(
+            "voice_transcribe_audio_too_large",
+            "voice.transcribe audio_base64 decoded audio is too large.",
+        )
+    return audio_bytes
+
+
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     env_map = _process_voice_env_map()
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except Exception:
+        except (OSError, ValueError):
             pass
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
@@ -922,7 +1041,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
                 provider_note = (
                     "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
                 )
-        except Exception as exc:
+        except ValueError as exc:
             provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
         return {
             "ready": True,
@@ -943,7 +1062,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         }
     try:
         provider = _resolve_provider(payload)
-    except Exception as exc:
+    except ValueError as exc:
         return {
             "ready": False,
             "local_ready": False,
@@ -1136,7 +1255,7 @@ def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) 
     caption_fingerprint = _text_fingerprint(caption_text)
     spoken_fingerprint = _text_fingerprint(spoken_text)
     if caption_text:
-        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "not_run"
+        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
     else:
         check = "passed"
     return {
@@ -1174,6 +1293,14 @@ def _text_fingerprint(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def _missing_voice_secret_message(context: str) -> str:
+    label = str(context or "Voice provider").strip() or "Voice provider"
+    return (
+        f"{label} is missing a configured API secret. "
+        "Add the required provider key to your builder env file and retry."
+    )
+
+
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     dedicated_provider = _resolve_dedicated_transcription_provider(payload)
     if dedicated_provider is not None:
@@ -1192,7 +1319,10 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if provider_kind not in SUPPORTED_PROVIDER_KINDS:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime.")
+        supported = ", ".join(sorted(SUPPORTED_PROVIDER_KINDS))
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime. Supported provider kinds: {supported}."
+        )
     if execution_transport and execution_transport != "direct_http":
         raise ValueError(
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
@@ -1202,15 +1332,19 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
             f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
         )
     if not base_url:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured.")
+        raise ValueError(
+            f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
-        raise ValueError(f"Active provider '{provider_id or provider_kind or 'unknown'}' has no env secret reference configured.")
+        raise ValueError(
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
+        )
     secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
     if not secret_value:
         raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' is missing secret value for env ref '{secret_env_ref}'."
+            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
     return {
         "provider_id": provider_id,
@@ -1236,13 +1370,15 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
     if provider_id or base_url or secret_env_ref:
         resolved_provider_id = provider_id or "openai"
         if resolved_provider_id != "openai":
-            raise ValueError(f"VOICE_TRANSCRIBE_PROVIDER '{resolved_provider_id}' is not supported yet.")
+            raise ValueError(
+                f"VOICE_TRANSCRIBE_PROVIDER {resolved_provider_id!r} is not supported yet. "
+                "Supported values: openai, auto, default, local, offline, faster-whisper, "
+                "local-faster-whisper, builder, provider, configured-provider."
+            )
         resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
-            raise ValueError(
-                f"Voice transcription is missing secret value for env ref '{resolved_secret_env_ref}'."
-            )
+            raise ValueError(_missing_voice_secret_message("Voice transcription"))
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
@@ -1264,6 +1400,12 @@ def _read_env_value(*, env_file_path: str, key: str) -> str | None:
     return _runtime_env_map(env_file_path=env_file_path).get(key)
 
 
+def _strip_surrounding_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
     if not path.exists():
@@ -1274,7 +1416,7 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         name, _, value = stripped.partition("=")
-        env_map[name.strip()] = value.strip()
+        env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
     return env_map
 
 
@@ -1297,6 +1439,16 @@ def _runtime_env_map(*, env_file_path: str | None = None) -> dict[str, str]:
 def _tail_nonempty_lines(text: str, *, limit: int) -> list[str]:
     lines = [" ".join(line.strip().split()) for line in str(text or "").splitlines()]
     return [line for line in lines if line][-limit:]
+
+
+def _kokoro_python_unsupported_message() -> str | None:
+    if sys.version_info >= (3, 14):
+        return "kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime."
+    return None
+
+
+def _python_runtime_label() -> str:
+    return f"python {sys.version_info.major}.{sys.version_info.minor}"
 
 
 def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
@@ -1365,7 +1517,7 @@ def _transcription_provider_mode(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    except Exception:
+    except (OSError, ValueError):
         env_map = _process_voice_env_map()
     provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
     if not provider_id:
@@ -1395,7 +1547,16 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
         return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
     if provider_id != "elevenlabs":
-        raise ValueError(f"voice.speak does not yet support provider '{provider_id}'.")
+        supported_providers = sorted(
+            {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}
+            | {LOCAL_TTS_PROVIDER, "local"}
+            | OPENAI_REALTIME_PROVIDER_ALIASES
+            | {"elevenlabs"}
+        )
+        raise ValueError(
+            f"voice.speak does not yet support provider {provider_id!r}. "
+            f"Supported provider_id values: {', '.join(supported_providers)}."
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice synthesis.")
     auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
@@ -1403,10 +1564,10 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
     secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for the TTS provider.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak"))
     provider_profile = get_provider_voice_profile(profile, "elevenlabs")
     speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
     voice_settings = tts.get("voice_settings")
@@ -1513,10 +1674,10 @@ def _resolve_openai_realtime_tts_request(
 ) -> dict[str, Any]:
     secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
     if not secret_env_ref:
-        raise ValueError("voice.speak requires a secret_env_ref for OpenAI Realtime.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
-        raise ValueError(f"voice.speak is missing secret value for env ref '{secret_env_ref}'.")
+        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
@@ -1617,7 +1778,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
 def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         pyttsx3 = importlib.import_module("pyttsx3")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
     temp_path = None
     try:
@@ -1656,10 +1817,16 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
         soundfile = importlib.import_module("soundfile")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
-    model_path = Path(str(request.get("model_path") or ""))
-    voices_path = Path(str(request.get("voices_path") or ""))
+    raw_model_path = str(request.get("model_path") or "").strip()
+    raw_voices_path = str(request.get("voices_path") or "").strip()
+    if not raw_model_path:
+        raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
+    if not raw_voices_path:
+        raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
+    model_path = Path(raw_model_path)
+    voices_path = Path(raw_voices_path)
     if not model_path.exists():
         raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
     if not voices_path.exists():
@@ -1682,7 +1849,7 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
 def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         websocket = importlib.import_module("websocket")
-    except Exception as exc:
+    except ImportError as exc:
         raise RuntimeError(
             "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
         ) from exc
@@ -1748,7 +1915,12 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             raw_message = ws.recv()
             if not raw_message:
                 continue
-            event = json.loads(raw_message)
+            try:
+                event = json.loads(raw_message)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS received malformed websocket message: {exc.msg}"
+                ) from exc
             event_type = str(event.get("type") or "")
             if event_type == "error":
                 error = event.get("error") if isinstance(event.get("error"), dict) else {}
@@ -1811,7 +1983,11 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
+            exc,
+        )
         return None
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list) or not voices:
@@ -1916,7 +2092,8 @@ def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
             try:
                 return max(1, int(configured))
             except ValueError:
-                pass
+                import sys as _sys
+                _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
     return 5
 
 
@@ -1983,6 +2160,11 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _reject_multipart_crlf(label: str, value: str) -> None:
+    if "\r" in value or "\n" in value:
+        raise ValueError(f"{label} must not contain CR or LF characters")
+
+
 def _post_multipart(
     url: str,
     *,
@@ -1993,17 +2175,25 @@ def _post_multipart(
     boundary = f"voice-chip-{uuid4().hex}"
     body = bytearray()
     for key, value in fields.items():
+        _reject_multipart_crlf("multipart field name", str(key))
+        _reject_multipart_crlf("multipart field value", str(value))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
         body.extend(str(value).encode("utf-8"))
         body.extend(b"\r\n")
     for file_info in files:
+        field_name = str(file_info["field_name"])
+        filename = str(file_info["filename"])
+        mime_type = str(file_info["mime_type"])
+        _reject_multipart_crlf("multipart file field name", field_name)
+        _reject_multipart_crlf("multipart filename", filename)
+        _reject_multipart_crlf("multipart content type", mime_type)
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(
             (
-                f'Content-Disposition: form-data; name="{file_info["field_name"]}"; '
-                f'filename="{file_info["filename"]}"\r\n'
-                f'Content-Type: {file_info["mime_type"]}\r\n\r\n'
+                f'Content-Disposition: form-data; name="{field_name}"; '
+                f'filename="{filename}"\r\n'
+                f'Content-Type: {mime_type}\r\n\r\n'
             ).encode("utf-8")
         )
         body.extend(bytes(file_info["content"]))
@@ -2048,12 +2238,75 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
 
 
 def _join_url(base_url: str, suffix: str) -> str:
-    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("base_url must be a non-empty string")
+    if not isinstance(suffix, str) or not suffix.strip():
+        raise ValueError("suffix must be a non-empty string")
+    clean_base = base_url.strip()
+    parsed = urllib.parse.urlparse(clean_base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("base_url must use an http or https URL with a host")
+    return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
 def _write_output(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def _hook_input_limit_bytes(hook: str) -> int:
+    if hook == "voice.transcribe":
+        max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+        return max_base64_chars + MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES
+    return MAX_HOOK_INPUT_BYTES
+
+
+def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
+    raw = path.read_bytes()
+    if len(raw) > _hook_input_limit_bytes(hook):
+        raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
+    try:
+        payload = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
+    return payload
+
+
+def _hook_error_payload(exc: Exception) -> dict[str, Any]:
+    error_code = ""
+    if isinstance(exc, _PublicHookInputError):
+        detail = str(exc)
+        error_code = exc.error_code
+    elif isinstance(exc, json.JSONDecodeError):
+        detail = "Voice hook input must be valid JSON."
+        error_code = "voice_hook_invalid_json"
+    else:
+        detail = str(exc)
+    payload: dict[str, Any] = {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": detail,
+        "metrics": {},
+        "result": {},
+        "error": detail,
+    }
+    if error_code:
+        payload["error_code"] = error_code
+        payload["error_type"] = exc.__class__.__name__
+        payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
+    return payload
 
 
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
@@ -2127,8 +2380,8 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    payload = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
     try:
+        payload = _load_hook_payload(Path(args.input), hook=args.hook)
         if args.hook == "voice.status":
             result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
@@ -2142,17 +2395,7 @@ def main() -> int:
         else:
             result = handle_voice_transcribe_hook(payload)
     except Exception as exc:
-        _write_output(
-            Path(args.output),
-            {
-                "returncode": 1,
-                "stdout": "",
-                "stderr": str(exc),
-                "metrics": {},
-                "result": {},
-                "error": str(exc),
-            },
-        )
+        _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
     _export_runtime_state_if_configured(result)
