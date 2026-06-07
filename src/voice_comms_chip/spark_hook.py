@@ -49,6 +49,7 @@ DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
 )
 OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
+_OPENAI_REALTIME_ALLOWED_HOSTS: frozenset[str] = frozenset({"api.openai.com"})
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
 ENV_TTS_MODEL_ID = "VOICE_TTS_ELEVENLABS_MODEL_ID"
@@ -1955,6 +1956,16 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
 
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+    _parsed = urllib.parse.urlparse(normalized)
+    if _parsed.scheme == "http":
+        raise ValueError(
+            "OpenAI Realtime base_url must use a secure scheme (https or wss), not http."
+        )
+    if (_parsed.hostname or "").lower() not in _OPENAI_REALTIME_ALLOWED_HOSTS:
+        raise ValueError(
+            f"OpenAI Realtime base_url hostname '{_parsed.hostname}' is not in the "
+            "permitted allowlist. Only api.openai.com is allowed."
+        )
     if normalized.startswith("http://"):
         normalized = "ws://" + normalized[len("http://") :]
     elif normalized.startswith("https://"):
