@@ -1,3 +1,4 @@
+import math
 from __future__ import annotations
 
 import argparse
@@ -1680,7 +1681,11 @@ def _resolve_openai_realtime_tts_request(
     timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
-    sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+    sample_rate_raw = _resolve_optional_float(tts.get("sample_rate"))
+    if sample_rate_raw is not None and (math.isnan(sample_rate_raw) or math.isinf(sample_rate_raw)):
+        sample_rate_raw = None
+    sample_rate = int(sample_rate_raw) if sample_rate_raw is not None else DEFAULT_OPENAI_REALTIME_SAMPLE_RATE
+    sample_rate = max(8000, min(48000, sample_rate))
     model_id = str(
         tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
     ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
