@@ -165,6 +165,7 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
 
 
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.status")
     status = _build_voice_status(payload)
     profile_summary = summarize_voice_profile(load_voice_profile())
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
@@ -230,6 +231,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.plan")
     profile_summary = summarize_voice_profile(load_voice_profile())
     reply_text = (
         "Telegram voice plan:\n"
@@ -1912,6 +1914,8 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
         )
         while True:
             raw_message = ws.recv()
+            if raw_message is None:
+                break
             if not raw_message:
                 continue
             try:
