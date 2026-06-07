@@ -1683,7 +1683,7 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     model_path = Path(str(request.get("model_path") or ""))
     voices_path = Path(str(request.get("voices_path") or ""))
     if not model_path.exists():
-        raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
+        raise RuntimeError("Kokoro model file was not found")
     if not voices_path.exists():
         raise RuntimeError(f"Kokoro voices file was not found at '{voices_path}'.")
     kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
