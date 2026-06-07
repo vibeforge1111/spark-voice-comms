@@ -750,7 +750,7 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
 
 
 def test_join_url_accepts_http_urls_and_trims_edges():
-    assert _join_url(" https://voice.example.test/api/ ", " /v1/speak ") == "https://voice.example.test/api/v1/speak"
+    assert _join_url(" https://api.elevenlabs.io/v1/ ", " /speak ") == "https://api.elevenlabs.io/v1/speak"
 
 
 def test_join_url_rejects_non_http_provider_urls_without_echoing_value():
@@ -769,6 +769,26 @@ def test_join_url_rejects_non_http_provider_urls_without_echoing_value():
 def test_join_url_requires_http_url_with_host(base_url):
     with pytest.raises(ValueError, match="http or https URL with a host|non-empty string"):
         _join_url(base_url, "voices")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://internal-service:8080/v1",
+        "https://evil.attacker.com/api",
+        "http://localhost:3000/api",
+        "http://127.0.0.1:8080/api",
+    ],
+)
+def test_join_url_rejects_hosts_not_in_allowlist(base_url):
+    with pytest.raises(ValueError, match="not in the allowed voice hosts list"):
+        _join_url(base_url, "voices")
+
+
+def test_join_url_accepts_allowed_hosts():
+    assert _join_url("https://api.elevenlabs.io/v1", "voices") == "https://api.elevenlabs.io/v1/voices"
+    assert _join_url("https://api.openai.com/v1", "audio/transcriptions") == "https://api.openai.com/v1/audio/transcriptions"
 
 
 def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
