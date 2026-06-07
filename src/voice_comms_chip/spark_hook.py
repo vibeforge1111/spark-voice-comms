@@ -581,8 +581,23 @@ def _voice_context_line(*, provider_note: dict[str, str], preference_note: dict[
     return "No API keys belong in Telegram; keep provider secrets in Spark's local config or secret layer."
 
 
+def _is_allowed_env_file_path(env_file_path: str) -> bool:
+    """Guard against path-traversal: only allow files under ~/.spark or cwd."""
+    resolved = Path(env_file_path).expanduser().resolve()
+    allowed_roots = [
+        Path.home().joinpath(".spark").resolve(),
+        Path.cwd().resolve(),
+    ]
+    return any(
+        resolved == root or str(resolved).startswith(str(root) + os.sep)
+        for root in allowed_roots
+    )
+
+
 def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if env_file_path and not _is_allowed_env_file_path(env_file_path):
+        return _process_voice_env_map()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
     except (OSError, ValueError):
