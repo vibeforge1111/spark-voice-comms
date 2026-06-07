@@ -878,6 +878,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 filename=filename,
             )
         except Exception as exc:
+            import logging as _log; _log.getLogger(__name__).warning("Suppressed: %s", _e, exc_info=True)
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
                     _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
