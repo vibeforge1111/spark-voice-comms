@@ -36,6 +36,10 @@ LOCAL_TTS_PROVIDER = "pyttsx3"
 LOCAL_KOKORO_TTS_PROVIDER = "kokoro"
 OPENAI_REALTIME_TTS_PROVIDER = "openai-realtime"
 DEFAULT_ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
+ALLOWED_VOICE_HOSTS = frozenset({
+    "api.elevenlabs.io",
+    "api.openai.com",
+})
 DEFAULT_ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64"
@@ -2246,6 +2250,11 @@ def _join_url(base_url: str, suffix: str) -> str:
     parsed = urllib.parse.urlparse(clean_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in ALLOWED_VOICE_HOSTS:
+        raise ValueError(
+            f"base_url host {hostname!r} is not in the allowed voice hosts list"
+        )
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
