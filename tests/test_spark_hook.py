@@ -55,6 +55,9 @@ def _payload(tmp_path, **overrides):
             "voice.install",
             "voice.transcribe",
             "voice.speak",
+            "voice.status",
+            "voice.plan",
+            "voice.onboard",
         ),
         "provider": {
             "provider_id": "openai",
@@ -167,6 +170,7 @@ def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
         result = handle_voice_status_hook(
             {
                 "builder_env_file_path": str(env_file),
+                "governor_decision": _voice_governor_decision("voice.status"),
                 "provider": {
                     "provider_id": "custom",
                     "provider_kind": "custom",
@@ -208,6 +212,7 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
         result = handle_voice_status_hook(
             {
                 "builder_env_file_path": str(env_file),
+                "governor_decision": _voice_governor_decision("voice.status"),
                 "provider": {
                     "provider_id": "custom",
                     "provider_kind": "custom",
@@ -259,6 +264,7 @@ def test_voice_status_prefers_dedicated_openai_transcription_env_over_custom_pro
     result = handle_voice_status_hook(
         {
             "builder_env_file_path": str(env_file),
+            "governor_decision": _voice_governor_decision("voice.status"),
             "provider": {
                 "provider_id": "custom",
                 "provider_kind": "custom",
@@ -279,7 +285,7 @@ def test_voice_status_prefers_dedicated_openai_transcription_env_over_custom_pro
 
 
 def test_voice_plan_returns_modular_steps():
-    result = handle_voice_plan_hook({})
+    result = handle_voice_plan_hook({"governor_decision": _voice_governor_decision("voice.plan")})
     assert result["returncode"] == 0
     assert "spark-voice-comms" in result["result"]["reply_text"]
 
@@ -313,7 +319,7 @@ def test_voice_onboard_guides_local_free_path():
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         return_value=False,
     ):
-        result = handle_voice_onboard_hook({"route": "local"})
+        result = handle_voice_onboard_hook({"route": "local", "governor_decision": _voice_governor_decision("voice.onboard")})
 
     assert result["returncode"] == 0
     assert result["result"]["recommended_path"] == "local_free"
@@ -334,7 +340,7 @@ def test_voice_onboard_prefers_ready_kokoro_for_local_tts():
         "voice_comms_chip.spark_hook._local_pyttsx3_available",
         return_value=False,
     ):
-        result = handle_voice_onboard_hook({"route": "local"})
+        result = handle_voice_onboard_hook({"route": "local", "governor_decision": _voice_governor_decision("voice.onboard")})
 
     assert result["returncode"] == 0
     assert result["metrics"]["local_ready"] == 1
@@ -366,7 +372,7 @@ def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voic
         "voice_comms_chip.spark_hook._local_pyttsx3_available",
         return_value=False,
     ):
-        result = handle_voice_onboard_hook({"route": "local", "builder_env_file_path": str(builder_env)})
+        result = handle_voice_onboard_hook({"route": "local", "builder_env_file_path": str(builder_env), "governor_decision": _voice_governor_decision("voice.onboard")})
 
     assert result["returncode"] == 0
     assert result["metrics"]["local_ready"] == 1
@@ -377,6 +383,7 @@ def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voic
 def test_voice_onboard_uses_source_labeled_local_preference():
     result = handle_voice_onboard_hook(
         {
+            "governor_decision": _voice_governor_decision("voice.onboard"),
             "advisor_context": {
                 "preferences": [
                     {
@@ -384,7 +391,7 @@ def test_voice_onboard_uses_source_labeled_local_preference():
                         "source": "governed_current_state_memory",
                     }
                 ]
-            }
+            },
         }
     )
 
@@ -564,7 +571,7 @@ def test_voice_onboard_reports_paid_provider_readiness(tmp_path):
         encoding="utf-8",
     )
 
-    result = handle_voice_onboard_hook({"route": "paid", "builder_env_file_path": str(env_file)})
+    result = handle_voice_onboard_hook({"route": "paid", "builder_env_file_path": str(env_file), "governor_decision": _voice_governor_decision("voice.onboard")})
 
     assert result["returncode"] == 0
     assert result["result"]["recommended_path"] == "paid_provider"
@@ -586,7 +593,7 @@ def test_voice_onboard_reads_openai_realtime_from_utf8_sig_env(tmp_path):
         encoding="utf-8-sig",
     )
 
-    result = handle_voice_onboard_hook({"route": "paid", "builder_env_file_path": str(env_file)})
+    result = handle_voice_onboard_hook({"route": "paid", "builder_env_file_path": str(env_file), "governor_decision": _voice_governor_decision("voice.onboard")})
 
     assert result["returncode"] == 0
     assert result["result"]["snapshot"]["paid_tts"]["ready"] is True

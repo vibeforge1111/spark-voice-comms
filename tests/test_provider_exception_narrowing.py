@@ -67,7 +67,7 @@ def test_voice_status_local_branch_surfaces_resolve_provider_programmer_error(tm
         side_effect=AttributeError("simulated provider resolver bug"),
     ):
         with pytest.raises(AttributeError, match="simulated provider resolver bug"):
-            handle_voice_status_hook({"builder_env_file_path": str(env_file)})
+            handle_voice_status_hook({"builder_env_file_path": str(env_file), "governor_decision": _voice_governor_decision("voice.status")})
 
 
 def test_voice_status_local_branch_keeps_value_error_as_provider_note(tmp_path) -> None:
@@ -78,7 +78,7 @@ def test_voice_status_local_branch_keeps_value_error_as_provider_note(tmp_path) 
         "voice_comms_chip.spark_hook._resolve_provider",
         side_effect=ValueError("Active provider has no base URL configured."),
     ):
-        result = handle_voice_status_hook({"builder_env_file_path": str(env_file)})
+        result = handle_voice_status_hook({"builder_env_file_path": str(env_file), "governor_decision": _voice_governor_decision("voice.status")})
 
     assert result["returncode"] == 0
     assert "no base URL configured" in result["result"]["provider_note"]
@@ -102,7 +102,7 @@ def test_voice_status_hosted_branch_surfaces_resolve_provider_programmer_error(t
         side_effect=AttributeError("simulated hosted provider resolver bug"),
     ):
         with pytest.raises(AttributeError, match="simulated hosted provider resolver bug"):
-            handle_voice_status_hook({"builder_env_file_path": str(env_file)})
+            handle_voice_status_hook({"builder_env_file_path": str(env_file), "governor_decision": _voice_governor_decision("voice.status")})
 
 
 def test_voice_speak_rejects_unexpected_resolved_provider_without_elevenlabs_fallback() -> None:
