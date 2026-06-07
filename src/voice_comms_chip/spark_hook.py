@@ -1275,7 +1275,8 @@ def _merge_latency(latency_payload: Any, **updates: int) -> dict[str, int]:
     for key, value in latency.items():
         try:
             merged[str(key)] = max(0, int(float(value)))
-        except (TypeError, ValueError):
+        except Exception as _e:
+            import logging as _log; _log.getLogger(__name__).warning("Suppressed: %s", _e, exc_info=True)
             continue
     for key, value in updates.items():
         merged[key] = max(0, int(value))
