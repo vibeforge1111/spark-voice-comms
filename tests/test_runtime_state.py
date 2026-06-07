@@ -103,3 +103,33 @@ def test_transcribe_state_tracks_transcript_without_delivery_claim():
     assert state["transcript"]["characters"] == len("Hello from a voice note.")
     assert state["transcript"]["audio_bytes"] == 321
     assert state["claim_levels"]["conversation_ready"] is False
+
+
+def test_delivery_ready_string_false_not_truthy():
+    """String 'false' from JSON must not be treated as truthy readiness."""
+    from voice_comms_chip.runtime_state import _normalize_telegram_delivery
+
+    # Case 1: ready='false', no success status → should be False
+    result = _normalize_telegram_delivery({"ready": "false"})
+    assert result["ready"] is False, (
+        "string 'false' should not claim delivery readiness"
+    )
+
+    # Case 2: ready='false', status='success' → should still be True via status
+    result = _normalize_telegram_delivery({
+        "ready": "false",
+        "last_send_voice_status": "success",
+    })
+    assert result["ready"] is True
+
+    # Case 3: ready='true' → should be True
+    result = _normalize_telegram_delivery({"ready": "true"})
+    assert result["ready"] is True
+
+    # Case 4: ready=True (bool) → should be True
+    result = _normalize_telegram_delivery({"ready": True})
+    assert result["ready"] is True
+
+    # Case 5: ready=None, no success → should be False
+    result = _normalize_telegram_delivery({})
+    assert result["ready"] is False

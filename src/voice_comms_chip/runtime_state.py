@@ -202,7 +202,7 @@ def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
 def _normalize_telegram_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
     status = str(delivery.get("last_send_voice_status") or delivery.get("status") or "unknown")
     return {
-        "ready": bool(delivery.get("ready") or status == "success"),
+        "ready": _str_bool(delivery.get("ready")) or status == "success",
         "last_send_voice_at": _optional_string(delivery.get("last_send_voice_at")),
         "last_send_voice_status": status,
         "last_failure_reason": _safe_reason(delivery.get("last_failure_reason") or delivery.get("failure_reason")),
@@ -276,6 +276,22 @@ def _safe_reason(value: Any) -> str:
 
 def _optional_string(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _str_bool(value: Any) -> bool:
+    """Convert a value to bool with string awareness.
+
+    JSON-serialized booleans often arrive as the strings 'true'/'false',
+    '1'/'0', or 'yes'/'no'. Python's built-in bool() treats any non-empty
+    string as True, so bool('false') == True — a silent readiness
+    over-claim.  This helper normalises common string representations
+    before falling back to truthiness.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(value)
 
 
 def _nonnegative_int(value: Any) -> int:
