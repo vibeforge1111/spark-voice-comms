@@ -15,6 +15,7 @@ import pytest
 from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
     _join_url,
+    _str_bool,
     _write_output,
     assertNativeGovernorHarnessAuthority,
     handle_voice_install_hook,
@@ -1582,3 +1583,42 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+class TestStrBool:
+    """Tests for _str_bool string-to-boolean conversion."""
+
+    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "Yes", "on", "On"])
+    def test_truthy_values(self, value):
+        assert _str_bool(value) is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "False", "FALSE", "no", "No", "off", "Off"])
+    def test_falsy_values(self, value):
+        assert _str_bool(value) is False
+
+    def test_empty_string_returns_default(self):
+        assert _str_bool("") is False
+
+    def test_empty_string_with_true_default(self):
+        assert _str_bool("", default=True) is True
+
+    @pytest.mark.parametrize("value", ["2", "maybe", "unknown", "status_code_0"])
+    def test_unrecognised_values_return_default(self, value):
+        assert _str_bool(value) is False
+        assert _str_bool(value, default=True) is True
+
+    def test_whitespace_stripped(self):
+        assert _str_bool("  true  ") is True
+        assert _str_bool("  0  ") is False
+
+    def test_numeric_zero_string_is_falsy(self):
+        """The string '0' is intentionally treated as falsy for boolean env-var
+        flags.  Callers with status *codes* must not use _str_bool."""
+        assert _str_bool("0") is False
+
+    def test_unrecognised_numeric_status_code_not_coerced(self):
+        """Status codes like '200' or '404' are not recognised as boolean
+        tokens and fall through to the default."""
+        assert _str_bool("200") is False
+        assert _str_bool("404") is False
+        assert _str_bool("200", default=True) is True
