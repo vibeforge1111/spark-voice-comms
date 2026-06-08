@@ -1891,6 +1891,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                     "type": "response.create",
                     "response": {
                         "conversation": "none",
+                        "instructions": str(request["instructions"]),
                         "output_modalities": ["audio"],
                         "audio": {
                             "output": {
