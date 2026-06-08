@@ -1720,8 +1720,12 @@ def _resolve_optional_float(value: Any) -> float | None:
     if not text:
         return None
     try:
-        return float(text)
-    except ValueError:
+        result = float(text)
+        # Reject NaN and Inf — they propagate through min/max and cause crashes
+        if result != result or abs(result) == float("inf"):
+            return None
+        return result
+    except (ValueError, OverflowError):
         return None
 
 
