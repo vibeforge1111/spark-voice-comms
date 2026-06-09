@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1761,7 +1762,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            detail = _redact_provider_error_body(exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc))
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -2211,7 +2212,7 @@ def _post_multipart(
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {_redact_provider_error_body(exc.read().decode('utf-8', errors='replace'))}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
@@ -2234,6 +2235,14 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _redact_provider_error_body(text: str) -> str:
+    """Redact known API key patterns from provider HTTP error response bodies."""
+    text = re.sub(r'xi-[A-Za-z0-9_\-]{20,}', '[REDACTED]', text)
+    text = re.sub(r'\bsk-[A-Za-z0-9_\-]{20,}', '[REDACTED]', text)
+    text = re.sub(r'Bearer\s+[A-Za-z0-9_\-\.]{20,}', 'Bearer [REDACTED]', text)
+    return text
 
 
 def _join_url(base_url: str, suffix: str) -> str:
