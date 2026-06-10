@@ -2237,13 +2237,16 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
 
 
 def _join_url(base_url: str, suffix: str) -> str:
-    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+    """Join a base URL and suffix while rejecting non-HTTP(S) and local provider URLs."""
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("base_url must be a non-empty string")
     if not isinstance(suffix, str) or not suffix.strip():
         raise ValueError("suffix must be a non-empty string")
     clean_base = base_url.strip()
     parsed = urllib.parse.urlparse(clean_base)
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(".localhost"):
+        raise ValueError(f"Provider base URL must not resolve to a local address: {hostname}")
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"

@@ -1582,3 +1582,20 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+def test_join_url_rejects_localhost_ssrf():
+    """Local addresses must be rejected to prevent SSRF via provider base_url."""
+    for base_url in [
+        "http://localhost:3000/api",
+        "http://127.0.0.1:8080/api",
+        "http://[::1]/api",
+        "http://sub.localhost/api",
+    ]:
+        with pytest.raises(ValueError, match="local address"):
+            _join_url(base_url, "voices")
+
+
+def test_join_url_accepts_remote_https():
+    """Remote HTTPS URLs must still work after SSRF validation."""
+    assert _join_url("https://api.elevenlabs.io", "v1/voices") == "https://api.elevenlabs.io/v1/voices"
