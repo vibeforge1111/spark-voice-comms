@@ -305,6 +305,30 @@ def test_voice_authority_rejects_tampered_tool_ledger():
         assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
 
 
+def test_voice_authority_baseline_accepts_unsigned_envelope_pre_signature_era():
+    decision = _voice_governor_decision("voice.speak")
+
+    assert "signature" not in decision
+    authority = assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+    assert authority["decision_id"] == "governor:voice-test"
+
+
+def test_voice_authority_baseline_ignores_garbage_signature_field_pre_signature_era():
+    decision = _voice_governor_decision("voice.speak")
+    decision["signature"] = {"alg": "none", "signature": "not-a-real-hmac"}
+
+    authority = assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+    assert authority["decision_id"] == "governor:voice-test"
+
+
+def test_voice_authority_gate_covers_install_speak_transcribe():
+    for hook in ("voice.install", "voice.speak", "voice.transcribe"):
+        with pytest.raises(ValueError, match="requires Harness Core Governor authority"):
+            assertNativeGovernorHarnessAuthority({}, hook=hook)
+
+
 def test_voice_onboard_guides_local_free_path():
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
         "voice_comms_chip.spark_hook._local_pyttsx3_available",
