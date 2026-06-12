@@ -80,3 +80,7 @@ Rollback is host-scoped. It should restore the previous voice profile/provider f
 ## Security Boundary
 
 Never place API keys in Telegram messages, docs, examples, screenshots, or committed config. Use environment variable names and masked IDs only.
+
+`voice.install`, `voice.transcribe`, and `voice.speak` require a native Harness Core Governor decision. The chip first validates the authority envelope structure and matching tool ledger. When `SPARK_GOVERNOR_HMAC_KEY` is present in the process environment, or `SPARK_VOICE_REQUIRE_SIGNED_AUTHORITY=1` is set, it also verifies the Governor HMAC signature and refuses unsigned, tampered, wrong-key, or wrong-key-id decisions. With neither setting present, the gate remains structural-only for compatibility with unsigned hosts.
+
+Governor HMAC keys are process-env only. Do not place `SPARK_GOVERNOR_HMAC_KEY` in hook payloads, Builder env files, runtime-state exports, examples, or Telegram-visible replies.

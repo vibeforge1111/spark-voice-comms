@@ -6,6 +6,7 @@ import json
 import sys
 import urllib.error
 import wave
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,7 +14,11 @@ from unittest.mock import patch
 import pytest
 
 from voice_comms_chip.spark_hook import (
+    SIGNATURE_ALGORITHM,
+    SIGNATURE_SCHEMA_VERSION,
     _build_speak_coherence,
+    _governor_decision_signature_payload,
+    _hmac_sha256_hex,
     _join_url,
     _write_output,
     assertNativeGovernorHarnessAuthority,
@@ -30,6 +35,17 @@ from voice_comms_chip.spark_hook import (
 FAKE_OPENAI_KEY = "fake-openai-key-for-tests"
 FAKE_ELEVENLABS_KEY = "fake-elevenlabs-key-for-tests"
 FAKE_ELEVENLABS_VOICE_ID = "fake-elevenlabs-voice-id"
+VOICE_AUTHORITY_ENV_KEYS = (
+    "SPARK_GOVERNOR_HMAC_KEY",
+    "SPARK_GOVERNOR_HMAC_KEY_ID",
+    "SPARK_VOICE_REQUIRE_SIGNED_AUTHORITY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_voice_authority_env(monkeypatch):
+    for key in VOICE_AUTHORITY_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
 
 class _FakeBinaryHttpResponse:
@@ -141,6 +157,20 @@ def _voice_governor_decision(*hooks: str) -> dict[str, object]:
         "authorizations": authorizations,
         "tool_ledgers": ledgers,
     }
+
+
+def _signed_voice_governor_decision(*hooks: str, key: str = "test-key", key_id: str = "local") -> dict[str, object]:
+    decision = deepcopy(_voice_governor_decision(*hooks))
+    signature = {
+        "schema_version": SIGNATURE_SCHEMA_VERSION,
+        "alg": SIGNATURE_ALGORITHM,
+        "key_id": key_id,
+        "nonce": "test-nonce",
+        "created_at": "2026-06-12T00:00:00Z",
+    }
+    signature["signature"] = _hmac_sha256_hex(_governor_decision_signature_payload(decision, signature), key)
+    decision["signature"] = signature
+    return decision
 
 
 def _authorized_voice_payload(hook: str, payload: dict[str, object]) -> dict[str, object]:
@@ -305,7 +335,7 @@ def test_voice_authority_rejects_tampered_tool_ledger():
         assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
 
 
-def test_voice_authority_baseline_accepts_unsigned_envelope_pre_signature_era():
+def test_voice_authority_accepts_unsigned_envelope_when_signature_not_required():
     decision = _voice_governor_decision("voice.speak")
 
     assert "signature" not in decision
@@ -314,13 +344,77 @@ def test_voice_authority_baseline_accepts_unsigned_envelope_pre_signature_era():
     assert authority["decision_id"] == "governor:voice-test"
 
 
-def test_voice_authority_baseline_ignores_garbage_signature_field_pre_signature_era():
+def test_voice_authority_ignores_garbage_signature_field_when_signature_not_required():
     decision = _voice_governor_decision("voice.speak")
     decision["signature"] = {"alg": "none", "signature": "not-a-real-hmac"}
 
     authority = assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
 
     assert authority["decision_id"] == "governor:voice-test"
+
+
+def test_voice_authority_accepts_signed_envelope_when_key_set():
+    decision = _signed_voice_governor_decision("voice.speak", key="test-key")
+
+    with patch.dict("os.environ", {"SPARK_GOVERNOR_HMAC_KEY": "test-key"}, clear=False):
+        authority = assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+    assert authority["decision_id"] == "governor:voice-test"
+
+
+def test_voice_authority_rejects_unsigned_envelope_when_key_set():
+    decision = _voice_governor_decision("voice.speak")
+
+    with patch.dict("os.environ", {"SPARK_GOVERNOR_HMAC_KEY": "test-key"}, clear=False):
+        with pytest.raises(ValueError, match="governor_signature_missing"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_tampered_signed_body_when_key_set():
+    decision = _signed_voice_governor_decision("voice.speak", key="test-key")
+    decision["tool_ledgers"][0]["result"]["status"] = "success"
+
+    with patch.dict("os.environ", {"SPARK_GOVERNOR_HMAC_KEY": "test-key"}, clear=False):
+        with pytest.raises(ValueError, match="governor_signature_invalid"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_bad_signature_when_key_set():
+    decision = _signed_voice_governor_decision("voice.speak", key="test-key")
+    signature = decision["signature"]["signature"]
+    decision["signature"]["signature"] = ("0" if signature[0] != "0" else "1") + signature[1:]
+
+    with patch.dict("os.environ", {"SPARK_GOVERNOR_HMAC_KEY": "test-key"}, clear=False):
+        with pytest.raises(ValueError, match="governor_signature_invalid"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_wrong_signature_key_when_key_set():
+    decision = _signed_voice_governor_decision("voice.speak", key="key-a")
+
+    with patch.dict("os.environ", {"SPARK_GOVERNOR_HMAC_KEY": "key-b"}, clear=False):
+        with pytest.raises(ValueError, match="governor_signature_invalid"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_wrong_signature_key_id_when_expected():
+    decision = _signed_voice_governor_decision("voice.speak", key="test-key", key_id="key-a")
+
+    with patch.dict(
+        "os.environ",
+        {"SPARK_GOVERNOR_HMAC_KEY": "test-key", "SPARK_GOVERNOR_HMAC_KEY_ID": "key-b"},
+        clear=False,
+    ):
+        with pytest.raises(ValueError, match="governor_signature_key_id_mismatch"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
+
+
+def test_voice_authority_rejects_when_signature_required_without_key():
+    decision = _voice_governor_decision("voice.speak")
+
+    with patch.dict("os.environ", {"SPARK_VOICE_REQUIRE_SIGNED_AUTHORITY": "1"}, clear=False):
+        with pytest.raises(ValueError, match="governor_signature_key_missing"):
+            assertNativeGovernorHarnessAuthority({"governor_decision": decision}, hook="voice.speak")
 
 
 def test_voice_authority_gate_covers_install_speak_transcribe():

@@ -4,12 +4,15 @@ import argparse
 import base64
 import binascii
 import hashlib
+import hmac
 import importlib
 import importlib.util
 import io
 import json
 import logging
+import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,6 +21,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import wave
+from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -70,6 +75,11 @@ ENV_OPENAI_REALTIME_REASONING_EFFORT = "VOICE_TTS_OPENAI_REALTIME_REASONING_EFFO
 ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
+ENV_GOVERNOR_HMAC_KEY = "SPARK_GOVERNOR_HMAC_KEY"
+ENV_GOVERNOR_HMAC_KEY_ID = "SPARK_GOVERNOR_HMAC_KEY_ID"
+ENV_VOICE_REQUIRE_SIGNED_AUTHORITY = "SPARK_VOICE_REQUIRE_SIGNED_AUTHORITY"
+SIGNATURE_SCHEMA_VERSION = "governor-decision-signature-v1"
+SIGNATURE_ALGORITHM = "hmac-sha256"
 MAX_HOOK_INPUT_BYTES = 1_000_000
 MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
@@ -112,6 +122,167 @@ class _PublicHookInputError(ValueError):
     def __init__(self, error_code: str, message: str) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+# Vendored from spark-harness-core governor_signature.py; keep in lockstep.
+def _canonical_json(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return _canonical_json_string(value)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return _canonical_json_float(value)
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        parts = []
+        for key in sorted(value.keys(), key=_utf16_sort_key):
+            if not isinstance(key, str):
+                raise TypeError("canonical JSON object keys must be strings")
+            parts.append(f"{_canonical_json_string(key)}:{_canonical_json(value[key])}")
+        return "{" + ",".join(parts) + "}"
+    raise TypeError(f"value of type {type(value).__name__} is not JSON-serializable")
+
+
+def _canonical_json_string(value: str) -> str:
+    _reject_lone_surrogates(value)
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def _canonical_json_float(value: float) -> str:
+    if not math.isfinite(value):
+        raise ValueError("canonical JSON numbers must be finite")
+    if value == 0:
+        return "0"
+    if value.is_integer() and abs(value) < 1e21:
+        return str(int(value))
+
+    text = repr(value).lower()
+    if "e" in text:
+        mantissa, exponent_text = text.split("e", 1)
+        exponent = int(exponent_text)
+        if 1e-6 <= abs(value) < 1e21:
+            return _decimal_to_plain(text)
+        mantissa = mantissa.rstrip("0").rstrip(".")
+        return f"{mantissa}e{exponent:+d}"
+    return text
+
+
+def _decimal_to_plain(value: str) -> str:
+    text = format(Decimal(value), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _utf16_sort_key(value: str) -> tuple[int, ...]:
+    _reject_lone_surrogates(value)
+    encoded = value.encode("utf-16-be")
+    return tuple(int.from_bytes(encoded[index : index + 2], "big") for index in range(0, len(encoded), 2))
+
+
+def _reject_lone_surrogates(value: str) -> None:
+    if re.search(r"[\ud800-\udfff]", value):
+        raise ValueError("canonical JSON strings must not contain lone surrogates")
+
+
+def _unsigned_governor_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    unsigned = deepcopy(decision)
+    unsigned.pop("signature", None)
+    return unsigned
+
+
+def _governor_decision_signature_payload(
+    decision: dict[str, Any],
+    signature: dict[str, Any],
+) -> str:
+    return _canonical_json(
+        {
+            "decision": _unsigned_governor_decision(decision),
+            "signature": {
+                "schema_version": signature.get("schema_version"),
+                "alg": signature.get("alg"),
+                "key_id": signature.get("key_id"),
+                "nonce": signature.get("nonce"),
+                "created_at": signature.get("created_at"),
+            },
+        }
+    )
+
+
+def _governor_signature_reason_codes(
+    governor_decision: dict[str, Any] | None,
+    *,
+    key: str | None = None,
+    expected_key_id: str | None = None,
+    require_signature: bool = False,
+) -> list[str]:
+    key_value = str(key or "").strip()
+    signature_required = require_signature or bool(key_value)
+    if not signature_required:
+        return []
+    if not key_value:
+        return ["governor_signature_key_missing"]
+    if not isinstance(governor_decision, dict):
+        return ["missing_governor_decision"]
+
+    signature = governor_decision.get("signature")
+    if not isinstance(signature, dict):
+        return ["governor_signature_missing"]
+
+    reason_codes: list[str] = []
+    if str(signature.get("schema_version") or "") != SIGNATURE_SCHEMA_VERSION:
+        reason_codes.append("governor_signature_schema_invalid")
+    if str(signature.get("alg") or "") != SIGNATURE_ALGORITHM:
+        reason_codes.append("governor_signature_alg_invalid")
+    if expected_key_id and str(signature.get("key_id") or "") != expected_key_id:
+        reason_codes.append("governor_signature_key_id_mismatch")
+
+    raw_signature = str(signature.get("signature") or "")
+    if len(raw_signature) != 64:
+        reason_codes.append("governor_signature_invalid")
+    if reason_codes:
+        return _dedupe(reason_codes)
+
+    expected_signature = _hmac_sha256_hex(_governor_decision_signature_payload(governor_decision, signature), key_value)
+    if not hmac.compare_digest(raw_signature, expected_signature):
+        reason_codes.append("governor_signature_invalid")
+    return _dedupe(reason_codes)
+
+
+def _hmac_sha256_hex(payload: str, key: str) -> str:
+    return hmac.new(key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _assert_governor_signature_if_required(authority: dict[str, Any], *, hook: str) -> None:
+    key = os.environ.get(ENV_GOVERNOR_HMAC_KEY, "").strip()
+    require_signed = os.environ.get(ENV_VOICE_REQUIRE_SIGNED_AUTHORITY, "").strip() == "1"
+    if not key and not require_signed:
+        return
+
+    reason_codes = _governor_signature_reason_codes(
+        authority,
+        key=key or None,
+        expected_key_id=os.environ.get(ENV_GOVERNOR_HMAC_KEY_ID, "").strip() or None,
+        require_signature=True,
+    )
+    if reason_codes:
+        raise ValueError(f"{hook} rejected Governor authority: {', '.join(reason_codes)}.")
 
 
 def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
@@ -159,6 +330,7 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
             for item in ledgers
         )
         if auth_ok and ledger_ok:
+            _assert_governor_signature_if_required(authority, hook=hook)
             return authority
 
     raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
