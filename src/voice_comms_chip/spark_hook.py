@@ -1955,6 +1955,7 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
 
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+    _validate_outbound_url(normalized)
     if normalized.startswith("http://"):
         normalized = "ws://" + normalized[len("http://") :]
     elif normalized.startswith("https://"):
@@ -2234,6 +2235,41 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+_PRIVATE_HOSTS = frozenset({
+    "169.254.169.254",  # cloud metadata
+    "metadata.google.internal",
+    "metadata.google.com",
+})
+
+
+def _validate_outbound_url(url: str) -> None:
+    """Reject URLs that target private/internal networks (SSRF protection).
+
+    Raises ValueError if the URL targets a private IP, cloud metadata service,
+    or uses a non-HTTP(S) scheme. Allows localhost/loopback for local dev.
+    """
+    from urllib.parse import urlparse
+    import ipaddress
+
+    parsed = urlparse(str(url).strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+
+    if scheme not in ("http", "https", "ws", "wss"):
+        raise ValueError(f"URL scheme must be http(s) or ws(s), got '{scheme}'.")
+    if not host:
+        raise ValueError("URL host is required.")
+    if host in _PRIVATE_HOSTS:
+        raise ValueError(f"URL host '{host}' is a private/metadata endpoint.")
+    # Check if host is a literal IP
+    try:
+        addr = ipaddress.ip_address(host)
+        if not addr.is_global and not addr.is_loopback:
+            raise ValueError(f"URL host '{host}' is a non-public IP address.")
+    except ValueError:
+        pass  # hostname, not a literal IP — OK
 
 
 def _join_url(base_url: str, suffix: str) -> str:
