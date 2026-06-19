@@ -2236,6 +2236,39 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     return ""
 
 
+_PRIVATE_HOSTS = frozenset({
+    "169.254.169.254",  # AWS/GCP/Azure metadata
+    "metadata.google.internal",
+    "metadata.google.com",
+})
+
+
+def _validate_outbound_url(url: str) -> None:
+    """Reject URLs that target private/reserved networks (SSRF protection).
+
+    Raises ValueError if the URL targets a private IP, cloud metadata service,
+    or uses a non-HTTP(S) scheme.
+    """
+    import ipaddress as _ipaddress
+
+    parsed = urllib.parse.urlparse(str(url).strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+
+    if scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme must be http or https, got '{scheme}'.")
+    if not host:
+        raise ValueError("URL host is required.")
+    if host in _PRIVATE_HOSTS:
+        raise ValueError(f"URL host '{host}' is a private/metadata endpoint.")
+    try:
+        addr = _ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise ValueError(f"URL host '{host}' is a non-public IP address.")
+    except ValueError:
+        pass  # hostname, not a literal IP — OK
+
+
 def _join_url(base_url: str, suffix: str) -> str:
     """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
     if not isinstance(base_url, str) or not base_url.strip():
@@ -2246,6 +2279,7 @@ def _join_url(base_url: str, suffix: str) -> str:
     parsed = urllib.parse.urlparse(clean_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
+    _validate_outbound_url(clean_base)
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
