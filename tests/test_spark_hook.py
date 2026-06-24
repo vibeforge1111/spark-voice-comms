@@ -17,6 +17,7 @@ from voice_comms_chip.spark_hook import (
     _join_url,
     _write_output,
     assertNativeGovernorHarnessAuthority,
+    export_voice_runtime_state_for_spark_os,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
@@ -748,9 +749,143 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert exported["schema_version"] == "spark.voice_runtime_state.v1"
     assert exported["stt"]["ready"] is True
     assert exported["telegram_delivery"]["ready"] is False
+    assert exported["request_ref"].startswith("request:sha256:")
+    assert exported["trace_ref"].startswith("trace:sha256:")
+    assert exported["trace_continuity"] == {
+        "request_joined": True,
+        "trace_joined": True,
+        "proof_joined": False,
+        "proof_storage": "missing",
+        "trace_context_scope": "configured_runtime_state_export",
+        "proof_status": "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
     assert "transcript_text" not in encoded
     assert "audio_base64" not in encoded
     assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_export_voice_runtime_state_for_spark_os_uses_spark_home(tmp_path):
+    spark_home = tmp_path / "spark-home"
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.dict(
+        "os.environ",
+        {
+            "SPARK_HOME": str(spark_home),
+            "VOICE_TTS_ELEVENLABS_VOICE_ID": FAKE_ELEVENLABS_VOICE_ID,
+            "OPENAI_API_KEY": FAKE_OPENAI_KEY,
+        },
+        clear=True,
+    ):
+        result = export_voice_runtime_state_for_spark_os()
+
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(exported)
+    assert result["path"] == str(runtime_state_path)
+    assert exported["schema_version"] == "spark.voice_runtime_state.v1"
+    assert exported["surface"] == "spark_os_healthcheck"
+    assert exported["stt"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is False
+    assert exported["request_ref"].startswith("request:sha256:")
+    assert exported["trace_ref"].startswith("trace:sha256:")
+    assert exported["trace_continuity"] == {
+        "request_joined": True,
+        "trace_joined": True,
+        "proof_joined": False,
+        "proof_storage": "missing",
+        "trace_context_scope": "spark_os_healthcheck_export",
+        "proof_status": "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
+    assert "spark_os_healthcheck_export:trace_context" in exported["source_ledger"]
+    assert "metadata only" in exported["redaction"]
+    assert FAKE_ELEVENLABS_VOICE_ID not in encoded
+    assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_export_voice_runtime_state_for_spark_os_preserves_delivery_proof(tmp_path):
+    spark_home = tmp_path / "spark-home"
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "spark.voice_runtime_state.v1",
+                "telegram_delivery": {
+                    "ready": True,
+                    "last_send_voice_at": "2026-06-02T08:47:00Z",
+                    "last_send_voice_status": "success",
+                    "telegram_message_id_present": True,
+                },
+                "latency": {"send_voice_ms": 42, "total_ms": 99},
+                "source_ledger": ["voice.speak", "telegram-sendVoice-trace"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_tts_status",
+        return_value={"ready": True, "provider": "macos-say", "status": "ready via macOS say local system TTS"},
+    ), patch.dict("os.environ", {"SPARK_HOME": str(spark_home)}, clear=True):
+        result = export_voice_runtime_state_for_spark_os()
+
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    assert result["runtime_state"]["telegram_delivery"]["ready"] is True
+    assert exported["stt"]["ready"] is True
+    assert exported["tts"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["last_send_voice_status"] == "success"
+    assert exported["telegram_delivery"]["telegram_message_id_present"] is True
+    assert exported["latency"]["send_voice_ms"] == 42
+    assert exported["claim_levels"]["delivery_ready"] is True
+    assert exported["claim_levels"]["conversation_ready"] is True
+    assert "telegram-sendVoice-trace" in exported["source_ledger"]
+
+
+def test_export_voice_runtime_state_for_spark_os_preserves_audio_fallback_delivery_proof(tmp_path):
+    spark_home = tmp_path / "spark-home"
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "spark.voice_runtime_state.v1",
+                "telegram_delivery": {
+                    "ready": True,
+                    "last_send_voice_at": "2026-06-02T09:17:38Z",
+                    "last_send_voice_status": "document_fallback",
+                    "telegram_message_id_present": True,
+                    "send_method": "sendAudio",
+                    "native_voice_message_ready": False,
+                },
+                "latency": {"send_voice_ms": 64, "total_ms": 121},
+                "source_ledger": ["voice.speak", "telegram-bot-voice-bridge"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_tts_status",
+        return_value={"ready": True, "provider": "macos-say", "status": "ready via macOS say local system TTS"},
+    ), patch.dict("os.environ", {"SPARK_HOME": str(spark_home)}, clear=True):
+        result = export_voice_runtime_state_for_spark_os()
+
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    assert result["runtime_state"]["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["last_send_voice_status"] == "document_fallback"
+    assert exported["telegram_delivery"]["send_method"] == "sendAudio"
+    assert exported["telegram_delivery"]["native_voice_message_ready"] is False
+    assert exported["telegram_delivery"]["telegram_message_id_present"] is True
+    assert exported["latency"]["send_voice_ms"] == 64
+    assert exported["claim_levels"]["delivery_ready"] is True
+    assert exported["claim_levels"]["conversation_ready"] is True
+    assert "telegram-bot-voice-bridge" in exported["source_ledger"]
 
 
 def test_join_url_accepts_http_urls_and_trims_edges():

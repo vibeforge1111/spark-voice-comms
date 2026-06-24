@@ -17,6 +17,10 @@ def build_voice_runtime_state(
     telegram_delivery: dict[str, Any] | None = None,
     latency: dict[str, Any] | None = None,
     source_ledger: list[str] | None = None,
+    request_ref: str | None = None,
+    trace_ref: str | None = None,
+    harness_proof_ref: str | None = None,
+    trace_context_scope: str | None = None,
     generated_at: str | None = None,
     legacy_alias_visible: bool = False,
 ) -> dict[str, Any]:
@@ -25,7 +29,16 @@ def build_voice_runtime_state(
     delivery_state = _normalize_telegram_delivery(telegram_delivery or {})
     latency_state = _normalize_latency(latency or {})
     claim_levels = _claim_levels(stt=stt_state, tts=tts_state, delivery=delivery_state)
-    return {
+    safe_request_ref = _redacted_ref("request", request_ref)
+    safe_trace_ref = _redacted_ref("trace", trace_ref)
+    safe_proof_ref = _redacted_ref("proof", harness_proof_ref)
+    trace_continuity = _trace_continuity(
+        request_ref=safe_request_ref,
+        trace_ref=safe_trace_ref,
+        harness_proof_ref=safe_proof_ref,
+        trace_context_scope=trace_context_scope,
+    )
+    state = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at or _now_iso(),
         "surface": str(surface or "unknown"),
@@ -38,7 +51,15 @@ def build_voice_runtime_state(
         "latency": latency_state,
         "claim_levels": claim_levels,
         "source_ledger": list(source_ledger or []),
+        "trace_continuity": trace_continuity,
     }
+    if safe_request_ref:
+        state["request_ref"] = safe_request_ref
+    if safe_trace_ref:
+        state["trace_ref"] = safe_trace_ref
+    if safe_proof_ref:
+        state["harness_proof_ref"] = safe_proof_ref
+    return state
 
 
 def state_from_status(
@@ -79,6 +100,10 @@ def state_from_status(
         telegram_delivery=delivery,
         latency=latency,
         source_ledger=["voice.status", "voice_profile"] + _optional_sources(payload),
+        request_ref=_payload_trace_value(payload, "request_ref", "request_id", "requestId"),
+        trace_ref=_payload_trace_value(payload, "trace_ref", "trace_id", "traceId"),
+        harness_proof_ref=_payload_trace_value(payload, "harness_proof_ref", "harnessProofRef", "proof_ref"),
+        trace_context_scope=_payload_trace_value(payload, "trace_context_scope") or "voice.status",
         legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
     )
 
@@ -119,6 +144,10 @@ def state_from_speak(
         telegram_delivery=delivery,
         latency=latency,
         source_ledger=["voice.speak", "voice_profile"] + _optional_sources(payload),
+        request_ref=_payload_trace_value(payload, "request_ref", "request_id", "requestId"),
+        trace_ref=_payload_trace_value(payload, "trace_ref", "trace_id", "traceId"),
+        harness_proof_ref=_payload_trace_value(payload, "harness_proof_ref", "harnessProofRef", "proof_ref"),
+        trace_context_scope=_payload_trace_value(payload, "trace_context_scope") or "voice.speak",
         legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
     )
 
@@ -155,6 +184,10 @@ def state_from_transcribe(
         telegram_delivery={},
         latency={"transcribe_ms": transcribe_ms},
         source_ledger=["voice.transcribe"] + _optional_sources(payload),
+        request_ref=_payload_trace_value(payload, "request_ref", "request_id", "requestId"),
+        trace_ref=_payload_trace_value(payload, "trace_ref", "trace_id", "traceId"),
+        harness_proof_ref=_payload_trace_value(payload, "harness_proof_ref", "harnessProofRef", "proof_ref"),
+        trace_context_scope=_payload_trace_value(payload, "trace_context_scope") or "voice.transcribe",
         legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
     ) | {
         "transcript": {
@@ -258,6 +291,38 @@ def mask_identifier(value: str | None) -> str:
     return f"{text[:4]}...{text[-4:]}"
 
 
+def _redacted_ref(kind: str, value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    prefix = f"{kind}:sha256:"
+    if text.startswith(prefix):
+        suffix = text[len(prefix):]
+        if suffix and all(char in "0123456789abcdefABCDEF" for char in suffix):
+            return f"{prefix}{suffix.lower()}"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}{digest}"
+
+
+def _trace_continuity(
+    *,
+    request_ref: str,
+    trace_ref: str,
+    harness_proof_ref: str,
+    trace_context_scope: str | None,
+) -> dict[str, Any]:
+    return {
+        "request_joined": bool(request_ref),
+        "trace_joined": bool(trace_ref),
+        "proof_joined": bool(harness_proof_ref),
+        "proof_storage": "redacted_ref_only" if harness_proof_ref else "missing",
+        "trace_context_scope": str(trace_context_scope or "missing").strip() or "missing",
+        "proof_status": "ref_only" if harness_proof_ref else "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
+
+
 def json_safe(value: Any) -> str:
     if isinstance(value, dict):
         parts = [f"{key}:{json_safe(value[key])}" for key in sorted(value)]
@@ -290,6 +355,20 @@ def _optional_sources(payload: dict[str, Any]) -> list[str]:
     if not isinstance(sources, list):
         return []
     return [str(source) for source in sources if str(source or "").strip()]
+
+
+def _payload_trace_value(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if str(value or "").strip():
+            return str(value).strip()
+    trace_context = payload.get("trace_context")
+    if isinstance(trace_context, dict):
+        for key in keys:
+            value = trace_context.get(key)
+            if str(value or "").strip():
+                return str(value).strip()
+    return ""
 
 
 def _now_iso() -> str:

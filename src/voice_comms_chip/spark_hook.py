@@ -2456,7 +2456,7 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
     stt = runtime_state.get("stt") if isinstance(runtime_state.get("stt"), dict) else {}
     tts = runtime_state.get("tts") if isinstance(runtime_state.get("tts"), dict) else {}
     delivery = runtime_state.get("telegram_delivery") if isinstance(runtime_state.get("telegram_delivery"), dict) else {}
-    return {
+    public_state = {
         "schema_version": runtime_state.get("schema_version"),
         "generated_at": runtime_state.get("generated_at"),
         "surface": runtime_state.get("surface"),
@@ -2500,17 +2500,177 @@ def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
         "source_ledger": runtime_state.get("source_ledger") if isinstance(runtime_state.get("source_ledger"), list) else [],
         "redaction": "metadata only; raw audio, transcript bodies, provider secrets, and unmasked voice ids omitted",
     }
+    for key in ("request_ref", "trace_ref", "harness_proof_ref"):
+        value = runtime_state.get(key)
+        if isinstance(value, str) and value.strip():
+            public_state[key] = value.strip()
+    trace_continuity = runtime_state.get("trace_continuity")
+    if isinstance(trace_continuity, dict):
+        public_state["trace_continuity"] = {
+            "request_joined": bool(trace_continuity.get("request_joined")),
+            "trace_joined": bool(trace_continuity.get("trace_joined")),
+            "proof_joined": bool(trace_continuity.get("proof_joined")),
+            "proof_storage": trace_continuity.get("proof_storage") or "missing",
+            "trace_context_scope": trace_continuity.get("trace_context_scope") or "missing",
+            "proof_status": trace_continuity.get("proof_status") or "not_execution_proof",
+            "raw_audio_exported": False,
+            "transcript_bodies_exported": False,
+        }
+    return public_state
+
+
+
+def default_voice_runtime_state_path() -> Path:
+    spark_home = Path(os.environ.get("SPARK_HOME", Path.home() / ".spark")).expanduser()
+    return spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+
+
+def _configured_runtime_state_path() -> Path | None:
+    path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
+    if not path_text:
+        return None
+    return Path(path_text).expanduser()
+
+
+def _runtime_state_from_hook_result(result: dict[str, Any]) -> dict[str, Any] | None:
+    result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
+    runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
+    return runtime_state
+
+
+def _runtime_state_with_preserved_delivery(public_state: dict[str, Any], target: Path) -> dict[str, Any]:
+    delivery = public_state.get("telegram_delivery") if isinstance(public_state.get("telegram_delivery"), dict) else {}
+    if delivery.get("ready"):
+        return public_state
+    try:
+        existing = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return public_state
+    if existing.get("schema_version") != "spark.voice_runtime_state.v1":
+        return public_state
+    existing_delivery = existing.get("telegram_delivery") if isinstance(existing.get("telegram_delivery"), dict) else {}
+    existing_status = str(existing_delivery.get("last_send_voice_status") or existing_delivery.get("status") or "")
+    if not (existing_delivery.get("ready") is True or existing_status in {"success", "document_fallback"}):
+        return public_state
+
+    merged = json.loads(json.dumps(public_state))
+    merged["telegram_delivery"] = {
+        "ready": True,
+        "last_send_voice_at": existing_delivery.get("last_send_voice_at"),
+        "last_send_voice_at_present": bool(
+            existing_delivery.get("last_send_voice_at") or existing_delivery.get("last_send_voice_at_present")
+        ),
+        "last_send_voice_status": existing_status or "success",
+        "last_failure_reason_present": bool(
+            existing_delivery.get("last_failure_reason") or existing_delivery.get("last_failure_reason_present")
+        ),
+        "telegram_message_id_present": bool(
+            existing_delivery.get("telegram_message_id_present") or existing_delivery.get("telegram_message_id")
+        ),
+        "send_method": existing_delivery.get("send_method"),
+        "native_voice_message_ready": bool(existing_delivery.get("native_voice_message_ready")),
+    }
+    latency = merged.get("latency") if isinstance(merged.get("latency"), dict) else {}
+    existing_latency = existing.get("latency") if isinstance(existing.get("latency"), dict) else {}
+    for key in ("send_voice_ms", "total_ms"):
+        if not latency.get(key) and existing_latency.get(key):
+            latency[key] = existing_latency[key]
+    merged["latency"] = latency
+    claims = merged.get("claim_levels") if isinstance(merged.get("claim_levels"), dict) else {}
+    claims["delivery_ready"] = True
+    claims["conversation_ready"] = bool(
+        (merged.get("stt") if isinstance(merged.get("stt"), dict) else {}).get("ready")
+        and (merged.get("tts") if isinstance(merged.get("tts"), dict) else {}).get("ready")
+    )
+    merged["claim_levels"] = claims
+    existing_sources = existing.get("source_ledger") if isinstance(existing.get("source_ledger"), list) else []
+    merged_sources = merged.get("source_ledger") if isinstance(merged.get("source_ledger"), list) else []
+    merged["source_ledger"] = list(dict.fromkeys([*merged_sources, *existing_sources]))
+    return merged
+
+
+def _runtime_state_with_export_trace_context(public_state: dict[str, Any], scope: str) -> dict[str, Any]:
+    merged = json.loads(json.dumps(public_state))
+    seed = {
+        "schema_version": merged.get("schema_version"),
+        "generated_at": merged.get("generated_at"),
+        "surface": merged.get("surface"),
+        "scope": scope,
+        "stt_ready": bool((merged.get("stt") if isinstance(merged.get("stt"), dict) else {}).get("ready")),
+        "tts_ready": bool((merged.get("tts") if isinstance(merged.get("tts"), dict) else {}).get("ready")),
+        "delivery_ready": bool(
+            (merged.get("telegram_delivery") if isinstance(merged.get("telegram_delivery"), dict) else {}).get("ready")
+        ),
+        "source_ledger": merged.get("source_ledger") if isinstance(merged.get("source_ledger"), list) else [],
+    }
+    encoded_seed = json.dumps(seed, sort_keys=True, separators=(",", ":"))
+    request_ref = str(merged.get("request_ref") or "").strip()
+    trace_ref = str(merged.get("trace_ref") or "").strip()
+    if not request_ref:
+        request_ref = f"request:sha256:{hashlib.sha256(('request:' + encoded_seed).encode('utf-8')).hexdigest()[:16]}"
+        merged["request_ref"] = request_ref
+    if not trace_ref:
+        trace_ref = f"trace:sha256:{hashlib.sha256(('trace:' + encoded_seed).encode('utf-8')).hexdigest()[:16]}"
+        merged["trace_ref"] = trace_ref
+    proof_ref = str(merged.get("harness_proof_ref") or "").strip()
+    trace_continuity = merged.get("trace_continuity") if isinstance(merged.get("trace_continuity"), dict) else {}
+    trace_continuity.update(
+        {
+            "request_joined": bool(request_ref),
+            "trace_joined": bool(trace_ref),
+            "proof_joined": bool(proof_ref),
+            "proof_storage": "redacted_ref_only" if proof_ref else "missing",
+            "trace_context_scope": scope,
+            "proof_status": "ref_only" if proof_ref else "not_execution_proof",
+            "raw_audio_exported": False,
+            "transcript_bodies_exported": False,
+        }
+    )
+    merged["trace_continuity"] = trace_continuity
+    sources = merged.get("source_ledger") if isinstance(merged.get("source_ledger"), list) else []
+    merged["source_ledger"] = list(dict.fromkeys([*sources, f"{scope}:trace_context"]))
+    return merged
+
+
+def export_voice_runtime_state_for_spark_os(
+    payload: dict[str, Any] | None = None,
+    *,
+    output_path: Path | str | None = None,
+) -> dict[str, Any]:
+    status_payload = {"surface": "spark_os_healthcheck"}
+    if payload:
+        status_payload.update(payload)
+    result = handle_voice_status_hook(status_payload)
+    runtime_state = _runtime_state_from_hook_result(result)
+    if runtime_state is None:
+        raise RuntimeError("voice.status did not produce runtime_state")
+    target = (
+        Path(output_path).expanduser()
+        if output_path is not None
+        else (_configured_runtime_state_path() or default_voice_runtime_state_path())
+    )
+    public_state = _runtime_state_with_preserved_delivery(
+        _runtime_state_with_export_trace_context(_public_runtime_state(runtime_state), "spark_os_healthcheck_export"),
+        target,
+    )
+    _write_output(target, public_state)
+    return {"path": str(target), "runtime_state": public_state}
 
 
 def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
-    path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
-    if not path_text:
+    path = _configured_runtime_state_path()
+    if path is None:
         return
-    result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
-    runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
+    runtime_state = _runtime_state_from_hook_result(result)
     if runtime_state is None:
         return
-    _write_output(Path(path_text).expanduser(), _public_runtime_state(runtime_state))
+    _write_output(
+        path,
+        _runtime_state_with_preserved_delivery(
+            _runtime_state_with_export_trace_context(_public_runtime_state(runtime_state), "configured_runtime_state_export"),
+            path,
+        ),
+    )
 
 
 def main() -> int:
