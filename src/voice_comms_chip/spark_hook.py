@@ -119,13 +119,28 @@ class _PublicHookInputError(ValueError):
         self.error_code = error_code
 
 
+def _voice_authority_tool_specs(tool_name: str) -> tuple[tuple[str, str], ...]:
+    specs = ((tool_name, f"capability:spark-voice-comms:{tool_name}"),)
+    if tool_name == "voice.transcribe":
+        return specs + (
+            ("media.voice.transcribe", "capability:spark-intelligence-builder:media.voice.transcribe"),
+            ("media.audio.transcribe", "capability:spark-intelligence-builder:media.audio.transcribe"),
+        )
+    return specs
+
+
 def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
     """Verify a native voice hook is bound to a Governor decision and tool ledger."""
     authority = (
         payload.get("governor_decision")
         or payload.get("governorDecision")
+        or payload.get("harness_core_governor_decision")
+        or payload.get("harnessCoreGovernorDecision")
+        or payload.get("spark_governor_decision")
+        or payload.get("sparkGovernorDecision")
         or payload.get("execution_authority")
         or payload.get("executionAuthority")
+        or payload.get("authority")
     )
     if not isinstance(authority, dict):
         raise ValueError(f"{hook} requires Harness Core Governor authority.")
@@ -138,11 +153,16 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
     actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
     ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
     authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
+    specs = _voice_authority_tool_specs(hook)
+    accepted_tool_names = {hook, *(name for name, _ in specs)}
+    accepted_capability_ids = {hook, *(capability_id for _, capability_id in specs)}
 
     for action in actions:
         if not isinstance(action, dict):
             continue
-        if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
+        action_tool = str(action.get("tool_name") or "").strip()
+        action_capability = str(action.get("capability_id") or "").strip()
+        if action_tool not in accepted_tool_names and action_capability not in accepted_capability_ids:
             continue
         action_id = str(action.get("action_id") or "").strip()
         if not action_id:
@@ -151,11 +171,13 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
             isinstance(item, dict)
             and item.get("verdict") == "allow"
             and str(item.get("action_id") or "").strip() == action_id
+            and str(item.get("capability_id") or action_capability).strip() in accepted_capability_ids
             for item in authorizations
         )
         ledger_ok = any(
             isinstance(item, dict)
-            and str(item.get("tool_name") or "").strip() == hook
+            and str(item.get("tool_name") or "").strip() in accepted_tool_names
+            and str(item.get("capability_id") or action_capability).strip() in accepted_capability_ids
             and str(item.get("action_id") or "").strip() == action_id
             and (
                 (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
@@ -338,8 +360,10 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not (str(payload.get("target") or payload.get("provider") or "").strip()):
+        raise ValueError("voice.install requires an explicit `target`.")
     assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
-    raw_target = str(payload.get("target") or payload.get("provider") or "kokoro").strip()
+    raw_target = str(payload.get("target") or payload.get("provider") or "").strip()
     target = raw_target.lower().replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)

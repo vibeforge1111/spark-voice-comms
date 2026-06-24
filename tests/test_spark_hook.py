@@ -73,6 +73,205 @@ def _payload(tmp_path, **overrides):
     return payload
 
 
+def _voice_authority_payload():
+    envelope = _voice_policy()
+    return {
+        "turn_intent_envelope_vnext": envelope,
+        "governor_decision": _voice_governor_decision_from_envelope(envelope),
+    }
+
+
+def _media_transcribe_authority_payload(*, media_kind: str = "audio"):
+    envelope = _voice_policy()
+    for action in envelope["proposed_actions"]:
+        if action["action_id"] != "action:voice-transcribe":
+            continue
+        action["action_id"] = f"action:media-{media_kind}-transcribe"
+        action["capability_id"] = f"capability:spark-intelligence-builder:media.{media_kind}.transcribe"
+        action["summary"] = f"Transcribe Telegram {media_kind} media."
+        action["args_ref"]["id"] = f"artifact:media-{media_kind}-transcribe"
+        action["args_ref"]["path_or_uri"] = f"test://media/{media_kind}/transcribe"
+    return {
+        "turn_intent_envelope_vnext": envelope,
+        "governor_decision": _voice_governor_decision_from_envelope(envelope),
+    }
+
+
+def _voice_policy():
+    return {
+        "schema_version": "turn-intent-envelope-vnext",
+        "turn_id": "turn:voice-test",
+        "raw_turn_ref": {
+            "id": "trace:voice-test",
+            "redaction_class": "metadata_only",
+            "summary": "Voice test turn.",
+        },
+        "selected_move": "execute_action",
+        "freshness": {
+            "fresh_user_intent_present": True,
+            "stale_state_used_as_authority": False,
+            "memory_used_as_instruction": False,
+            "pending_state_used_as_authority": False,
+        },
+        "action_authority": {
+            "state": "executable",
+            "risk_tier": "medium",
+            "confidence": 0.95,
+            "requires_human_confirmation": False,
+            "reason": "Focused voice hook regression.",
+        },
+        "proposed_actions": [
+            {
+                "action_id": "action:voice-install",
+                "capability_id": "capability:spark-voice-comms:voice.install",
+                "action_type": "edit_file",
+                "risk_tier": "medium",
+                "summary": "Install local voice package.",
+                "args_ref": {
+                    "id": "artifact:voice-install",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/install",
+                    "redaction_class": "metadata_only",
+                    "summary": "Install args.",
+                },
+                "requires_confirmation": False,
+            },
+            {
+                "action_id": "action:voice-transcribe",
+                "capability_id": "capability:spark-voice-comms:voice.transcribe",
+                "action_type": "external_api_call",
+                "risk_tier": "medium",
+                "summary": "Transcribe voice media.",
+                "args_ref": {
+                    "id": "artifact:voice-transcribe",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/transcribe",
+                    "redaction_class": "metadata_only",
+                    "summary": "Transcribe args.",
+                },
+                "requires_confirmation": False,
+            },
+            {
+                "action_id": "action:voice-speak",
+                "capability_id": "capability:spark-voice-comms:voice.speak",
+                "action_type": "external_api_call",
+                "risk_tier": "medium",
+                "summary": "Synthesize voice reply.",
+                "args_ref": {
+                    "id": "artifact:voice-speak",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/speak",
+                    "redaction_class": "metadata_only",
+                    "summary": "Speak args.",
+                },
+                "requires_confirmation": False,
+            },
+        ],
+    }
+
+
+def _voice_governor_decision_from_envelope(envelope):
+    authorizations = []
+    ledgers = []
+    now = "2026-06-02T00:00:00Z"
+    for action in envelope["proposed_actions"]:
+        decision_id = f"decision:{action['action_id'].split(':', 1)[1]}"
+        authorization = {
+            "schema_version": "authorization-decision-v1",
+            "decision_id": decision_id,
+            "created_at": now,
+            "turn_id": envelope["turn_id"],
+            "action_id": action["action_id"],
+            "capability_id": action["capability_id"],
+            "verdict": "allow",
+            "risk_tier": action["risk_tier"],
+            "reasons": ["harness_core_authorized", "voice_governor_fixture"],
+            "evidence": [
+                {
+                    "id": "evidence:voice-test",
+                    "kind": "test_fixture",
+                    "summary": "Voice Governor fixture.",
+                    "redaction_class": "metadata_only",
+                }
+            ],
+            "approval": {"required": False, "status": "not_required"},
+            "restrictions": {
+                "network_allowed": action["action_type"] == "external_api_call",
+                "write_allowed": action["action_type"] != "read",
+                "publish_allowed": False,
+            },
+            "trace": {
+                "id": f"trace:{action['action_id'].split(':', 1)[1]}",
+                "summary": "Voice authorization trace.",
+                "redaction_class": "metadata_only",
+            },
+        }
+        authorizations.append(authorization)
+        ledgers.append(
+            {
+                "schema_version": "tool-call-ledger-v1",
+                "ledger_id": f"ledger:{action['action_id'].split(':', 1)[1]}",
+                "created_at": now,
+                "turn_id": envelope["turn_id"],
+                "action_id": action["action_id"],
+                "capability_id": action["capability_id"],
+                "tool_name": action["capability_id"].rsplit(":", 1)[-1],
+                "lifecycle": [
+                    {"stage": "propose", "at": now, "verdict": "passed", "summary": "Action proposed."},
+                    {"stage": "validate", "at": now, "verdict": "passed", "summary": "Arguments validated."},
+                    {"stage": "authorize", "at": now, "verdict": "passed", "summary": "Governor authorized."},
+                    {"stage": "execute", "at": now, "verdict": "pending", "summary": "Execution pending."},
+                ],
+                "authorization": authorization,
+                "arguments": {
+                    "schema_valid": True,
+                    "raw_ref": action["args_ref"],
+                    "sanitized_ref": action["args_ref"],
+                },
+                "result": {
+                    "status": "not_started",
+                    "summary": "Voice execution has not started.",
+                    "sanitized_output_ref": action["args_ref"],
+                },
+                "trace": authorization["trace"],
+            }
+        )
+    return {
+        "schema_version": "governor-decision-v1",
+        "decision_id": "governor-decision:voice-test",
+        "created_at": now,
+        "surface": "telegram",
+        "turn_id": envelope["turn_id"],
+        "selected_move": "execute_action",
+        "authority_state": "executable",
+        "risk_tier": "medium",
+        "outcome": "execute",
+        "envelope": envelope,
+        "authorizations": authorizations,
+        "tool_ledgers": ledgers,
+        "execution_boundary": {
+            "action_authorized": True,
+            "action_count": len(envelope["proposed_actions"]),
+            "authorized_action_count": len(authorizations),
+            "requires_human_confirmation": False,
+            "legacy_authority_demoted": True,
+            "reasons": ["harness_core_authorized"],
+        },
+        "reply_contract": {
+            "style": "human_conversational",
+            "instruction": "Execute the authorized voice action.",
+            "inspect_link_allowed": True,
+            "should_interrupt": False,
+        },
+        "evidence": authorizations[0]["evidence"],
+        "trace": {
+            "id": "trace:voice-governor-test",
+            "summary": "Voice Governor decision trace.",
+            "redaction_class": "metadata_only",
+        },
+    }
+
+
 def test_read_env_map_strips_matching_outer_quotes(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -426,6 +625,98 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
     assert "local setup step" in result["result"]["reply_text"]
     assert "VOICE_TTS_KOKORO_MODEL_PATH" not in result["result"]["reply_text"]
     assert "Python:" not in result["result"]["reply_text"]
+
+
+def test_voice_install_requires_explicit_target():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        try:
+            handle_voice_install_hook({})
+        except ValueError as exc:
+            assert "requires an explicit `target`" in str(exc)
+        else:  # pragma: no cover - defensive assertion
+            raise AssertionError("voice.install should require an explicit target")
+
+    run.assert_not_called()
+
+
+def test_voice_install_requires_governor_authority():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_install_hook({"target": "kokoro"})
+
+    run.assert_not_called()
+
+
+def test_voice_install_rejects_vnext_without_governor_authority():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+
+    run.assert_not_called()
+
+
+def test_voice_transcribe_requires_governor_authority(tmp_path):
+    payload = {
+        "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        "filename": "telegram-voice.ogg",
+        "mime_type": "audio/ogg",
+        "builder_env_file_path": str(tmp_path / ".env"),
+    }
+    with patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("transcription should not run without Governor authority"),
+    ):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_voice_transcribe_accepts_media_audio_governor_authority(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._transcribe_with_local_faster_whisper",
+        return_value="Media audio transcript",
+    ):
+        result = handle_voice_transcribe_hook(
+            {
+                "audio_base64": base64.b64encode(b"fake-m4a-bytes").decode("ascii"),
+                "filename": "telegram-audio.m4a",
+                "mime_type": "audio/mp4",
+                "builder_env_file_path": str(env_file),
+                **_media_transcribe_authority_payload(media_kind="audio"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["transcript_text"] == "Media audio transcript"
+    assert result["result"]["mode"] == "local_faster_whisper"
+
+
+def test_voice_transcribe_rejects_unrelated_media_governor_authority(tmp_path):
+    payload = {
+        "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        "filename": "telegram-voice.ogg",
+        "mime_type": "audio/ogg",
+        "builder_env_file_path": str(tmp_path / ".env"),
+        **_media_transcribe_authority_payload(media_kind="image"),
+    }
+    with patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("transcription should not run with unrelated media authority"),
+    ):
+        with pytest.raises(ValueError, match="matching Harness Core authorization and tool ledger"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_voice_speak_requires_governor_authority():
+    with patch.dict(sys.modules, {"pyttsx3": SimpleNamespace(init=AssertionError("tts should not run without Governor authority"))}):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_speak_hook(
+                {
+                    "text": "Local free voice.",
+                    "tts": {"provider_id": "pyttsx3"},
+                }
+            )
 
 
 def test_voice_install_kokoro_skips_pip_when_already_installed():
