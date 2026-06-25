@@ -1430,10 +1430,11 @@ def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
 
     captured: dict[str, object] = {}
 
-    def fake_create_connection(url: str, *, header: list[str], timeout: float):
+    def fake_create_connection(url: str, *, header: list[str], timeout: float, **kwargs):
         captured["url"] = url
         captured["header"] = header
         captured["timeout"] = timeout
+        captured["max_size"] = kwargs.get("max_size")
         return FakeRealtimeSocket()
 
     env_file = tmp_path / ".env"
@@ -1497,7 +1498,7 @@ def test_voice_speak_reports_malformed_openai_realtime_websocket_message(tmp_pat
         def close(self) -> None:
             return None
 
-    def fake_create_connection(url: str, *, header: list[str], timeout: float):
+    def fake_create_connection(url: str, *, header: list[str], timeout: float, **kwargs):
         return FakeRealtimeSocket()
 
     env_file = tmp_path / ".env"
