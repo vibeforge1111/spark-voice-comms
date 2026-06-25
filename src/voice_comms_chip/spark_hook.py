@@ -1732,12 +1732,28 @@ def _resolve_optional_float(value: Any) -> float | None:
         return None
 
 
+_ELEVENLABS_ALLOWED_HOSTS: frozenset[str] = frozenset({
+    "api.elevenlabs.io",
+})
+
+
+def _validate_elevenlabs_base_url(base_url: str) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    if host not in _ELEVENLABS_ALLOWED_HOSTS:
+        raise ValueError(
+            f"ElevenLabs base_url host '{host}' is not in the permitted allowlist. "
+            f"Allowed: {sorted(_ELEVENLABS_ALLOWED_HOSTS)}"
+        )
+
+
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
     voice_id = str(request["voice_id"]).strip()
     if not voice_id:
         raise ValueError(
             f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
         )
+    _validate_elevenlabs_base_url(str(request["base_url"]))
     retried_with_fallback = False
     while True:
         base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
