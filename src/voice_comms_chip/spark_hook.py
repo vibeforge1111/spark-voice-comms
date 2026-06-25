@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import ssl
 import sys
 import tempfile
 import time
@@ -1918,6 +1919,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
         header=headers,
         timeout=timeout,
         max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+        sslopt={"cert_reqs": ssl.CERT_REQUIRED},
     )
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
