@@ -73,6 +73,9 @@ ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
 MAX_HOOK_INPUT_BYTES = 1_000_000
 MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
+MAX_PROVIDER_AUDIO_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_PROVIDER_JSON_RESPONSE_BYTES = 1 * 1024 * 1024    # 1 MB
+MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -1779,12 +1782,12 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
         )
         try:
             with urllib.request.urlopen(req, timeout=45) as response:
-                audio_bytes = response.read()
+                audio_bytes = _read_response_bounded(response, max_bytes=MAX_PROVIDER_AUDIO_RESPONSE_BYTES)
             if not audio_bytes:
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            detail = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode("utf-8", errors="ignore") if exc.fp else str(exc)
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -2004,7 +2007,7 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(_read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES).decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning(
             "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
@@ -2182,6 +2185,29 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _read_response_bounded(response, *, max_bytes: int) -> bytes:
+    """Read an HTTP response body up to max_bytes to prevent OOM from malicious providers."""
+    chunks: list[bytes] = []
+    total_read = 0
+    while True:
+        chunk_size = min(max_bytes - total_read, 65536)
+        if chunk_size <= 0:
+            # Reached the limit; verify there is no more data.
+            peek = response.read(1)
+            if peek:
+                raise RuntimeError(
+                    f"Provider response exceeded maximum allowed size of {max_bytes} bytes; "
+                    "possible malicious or compromised provider."
+                )
+            break
+        chunk = response.read(chunk_size)
+        if not chunk:
+            break
+        total_read += len(chunk)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _reject_multipart_crlf(label: str, value: str) -> None:
     if "\r" in value or "\n" in value:
         raise ValueError(f"{label} must not contain CR or LF characters")
@@ -2232,9 +2258,9 @@ def _post_multipart(
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            return response.read()
+            return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 

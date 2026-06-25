@@ -36,8 +36,12 @@ class _FakeBinaryHttpResponse:
     def __init__(self, payload: bytes) -> None:
         self._payload = payload
 
-    def read(self) -> bytes:
-        return self._payload
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            return self._payload
+        result = self._payload[:size]
+        self._payload = self._payload[size:]
+        return result
 
     def __enter__(self):
         return self
@@ -1582,3 +1586,72 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
     assert result["result"]["voice_id"] == "fallback-voice-id"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fallback-mpeg-bytes"
     assert any(url.endswith("/voices") for url in calls)
+
+
+# --- HTTP response size limit tests ---
+
+from voice_comms_chip.spark_hook import (
+    _read_response_bounded,
+    MAX_PROVIDER_AUDIO_RESPONSE_BYTES,
+    MAX_PROVIDER_JSON_RESPONSE_BYTES,
+    MAX_PROVIDER_ERROR_RESPONSE_BYTES,
+)
+
+
+class _FakeResponseWithLimit:
+    """Fake response that produces data up to max_chunks before empty."""
+
+    def __init__(self, chunk: bytes, total_chunks: int) -> None:
+        self._chunk = chunk
+        self._remaining = total_chunks
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        if size < 0:
+            data = self._chunk * self._remaining
+            self._remaining = 0
+            return data
+        chunk = self._chunk[:size]
+        self._remaining -= 1
+        return chunk
+
+
+def test_read_response_bounded_normal():
+    """Normal response under the limit is read completely."""
+    data = b"hello world"
+    resp = _FakeResponseWithLimit(data, total_chunks=1)
+    result = _read_response_bounded(resp, max_bytes=1024)
+    assert result == data
+
+
+def test_read_response_bounded_exact_limit():
+    """Response exactly at the limit is read completely."""
+    data = b"x" * 1024
+    resp = _FakeResponseWithLimit(b"x", total_chunks=1024)
+    result = _read_response_bounded(resp, max_bytes=1024)
+    assert result == data
+
+
+def test_read_response_bounded_exceeds_limit():
+    """Response exceeding the limit raises RuntimeError."""
+    resp = _FakeResponseWithLimit(b"x" * 65536, total_chunks=1000)
+    try:
+        _read_response_bounded(resp, max_bytes=1024)
+        assert False, "Expected RuntimeError"
+    except RuntimeError as exc:
+        assert "exceeded maximum allowed size" in str(exc)
+
+
+def test_read_response_bounded_zero_length():
+    """Empty response returns empty bytes."""
+    resp = _FakeResponseWithLimit(b"", total_chunks=0)
+    result = _read_response_bounded(resp, max_bytes=1024)
+    assert result == b""
+
+
+def test_constants_are_reasonable():
+    """Verify the size limit constants are sane."""
+    assert MAX_PROVIDER_AUDIO_RESPONSE_BYTES == 50 * 1024 * 1024
+    assert MAX_PROVIDER_JSON_RESPONSE_BYTES == 1 * 1024 * 1024
+    assert MAX_PROVIDER_ERROR_RESPONSE_BYTES == 64 * 1024
