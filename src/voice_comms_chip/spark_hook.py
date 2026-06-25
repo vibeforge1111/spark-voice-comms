@@ -371,7 +371,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
             return {
                 "returncode": 1,
                 "stdout": "kokoro install failed",
-                "stderr": "\n".join(pip_tail),
+                "stderr": "Package install failed",
                 "metrics": {"installed": 0, "already_installed": 0},
                 "result": {
                     "reply_text": (
@@ -383,7 +383,6 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
                     "python": sys.executable,
                     "installed": False,
                     "already_installed": False,
-                    "pip_tail": pip_tail,
                 },
             }
         install_status = "installed"
@@ -428,7 +427,7 @@ def _install_faster_whisper() -> dict[str, Any]:
             return {
                 "returncode": 1,
                 "stdout": "faster-whisper install failed",
-                "stderr": "\n".join(pip_tail),
+                "stderr": "Package install failed",
                 "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
                 "result": {
                     "reply_text": (
@@ -441,7 +440,6 @@ def _install_faster_whisper() -> dict[str, Any]:
                     "installed": False,
                     "already_installed": False,
                     "stt_ready": False,
-                    "pip_tail": pip_tail,
                 },
             }
         install_status = "installed"
