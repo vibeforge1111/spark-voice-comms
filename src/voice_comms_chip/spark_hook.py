@@ -168,9 +168,26 @@ def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) 
     raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
 
 
+def _unknown_profile_summary() -> dict[str, Any]:
+    """Profile-summary shape used when the voice profile cannot be loaded."""
+    return {
+        "profile_name": "unknown",
+        "tone_identity": "unknown",
+        "default_emotion": "unknown",
+        "barge_in_enabled": False,
+        "streaming_reply_default": False,
+        "provider_voice_ids": [],
+    }
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError as exc:
+        profile_summary = _unknown_profile_summary()
+        existing_reason = status.get("reason", "voice status error")
+        status["reason"] = f"{existing_reason}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
@@ -234,7 +251,10 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError:
+        profile_summary = _unknown_profile_summary()
     reply_text = (
         "Telegram voice plan:\n"
         "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
@@ -805,7 +825,10 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
     assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
-    profile = load_voice_profile()
+    try:
+        profile = load_voice_profile()
+    except RuntimeError:
+        profile = {"profile_name": "unknown", "provider_voices": {}}
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
     synthesize_started = time.perf_counter()
