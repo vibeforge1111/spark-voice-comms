@@ -76,6 +76,7 @@ MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
 MAX_PROVIDER_AUDIO_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
 MAX_PROVIDER_JSON_RESPONSE_BYTES = 1 * 1024 * 1024    # 1 MB
 MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
+MAX_WEBSOCKET_MESSAGE_BYTES = 10 * 1024 * 1024         # 10 MB per message
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -1887,7 +1888,14 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     headers = [
         "Authorization: Bearer " + str(request["secret_value"]),
     ]
-    ws = websocket.create_connection(url, header=headers, timeout=timeout)
+    # Enforce a per-frame size cap at the library level so an oversized frame is
+    # rejected during recv() rather than buffered into memory first (OOM guard).
+    ws = websocket.create_connection(
+        url,
+        header=headers,
+        timeout=timeout,
+        max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+    )
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
     try:
@@ -1940,6 +1948,13 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             raw_message = ws.recv()
             if not raw_message:
                 continue
+            # Defensive second line of defense behind the connect-time max_size:
+            # reject oversized text or binary frames before they are parsed.
+            if isinstance(raw_message, (str, bytes, bytearray)) and len(raw_message) > MAX_WEBSOCKET_MESSAGE_BYTES:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS websocket message exceeds size limit "
+                    f"({len(raw_message)} > {MAX_WEBSOCKET_MESSAGE_BYTES} bytes)"
+                )
             try:
                 event = json.loads(raw_message)
             except json.JSONDecodeError as exc:
