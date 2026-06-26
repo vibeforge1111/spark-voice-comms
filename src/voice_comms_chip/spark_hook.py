@@ -1365,13 +1365,12 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         raise ValueError(
             f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
         )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
-    secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
@@ -1587,8 +1586,6 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
             f"voice.speak does not yet support provider {provider_id!r}. "
             f"Supported provider_id values: {', '.join(supported_providers)}."
         )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice synthesis.")
     auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
     if auth_method != "api_key_env":
         raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
