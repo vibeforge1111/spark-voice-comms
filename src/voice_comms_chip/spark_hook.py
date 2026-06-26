@@ -1441,12 +1441,15 @@ def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     if not path.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        name, _, value = stripped.partition("=")
-        env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
+    try:
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, _, value = stripped.partition("=")
+            env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
+    except OSError as exc:
+        raise ValueError(f"Failed to read builder env file '{env_file_path}': {exc}") from exc
     return env_map
 
 
