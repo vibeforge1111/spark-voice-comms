@@ -75,7 +75,8 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"Voice profile at '{target}' contains invalid JSON. "
+            f"Voice profile at '{target}' contains invalid JSON "
+            f"(line {exc.lineno}, column {exc.colno}: {exc.msg}). "
             "Reinstall the voice-comms chip or fix the profile file."
         ) from exc
     if not isinstance(payload, dict):
