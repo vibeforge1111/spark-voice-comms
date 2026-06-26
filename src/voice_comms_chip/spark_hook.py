@@ -394,7 +394,30 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
             "kokoro-onnx>=0.5.0",
             "soundfile>=0.12",
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except subprocess.TimeoutExpired as exc:
+            partial = "\n".join(part for part in (exc.stdout, exc.stderr) if isinstance(part, str)).strip()
+            pip_tail = _tail_nonempty_lines(partial, limit=8)
+            return {
+                "returncode": 1,
+                "stdout": "kokoro install timed out",
+                "stderr": "\n".join(pip_tail) or "Kokoro install exceeded the 5 minute pip timeout.",
+                "metrics": {"installed": 0, "already_installed": 0},
+                "result": {
+                    "reply_text": (
+                        "Kokoro install exceeded the 5 minute pip timeout in this Python runtime.\n"
+                        "I did not touch provider keys or model paths.\n"
+                        "Next: check your network or pip mirror, then rerun `/voice install kokoro`."
+                    ),
+                    "target": target,
+                    "python": sys.executable,
+                    "installed": False,
+                    "already_installed": False,
+                    "pip_tail": pip_tail,
+                    "error_code": "voice_install_pip_timeout",
+                },
+            }
         pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         pip_tail = _tail_nonempty_lines(pip_output, limit=8)
         if completed.returncode != 0:
@@ -450,7 +473,31 @@ def _install_faster_whisper() -> dict[str, Any]:
             "install",
             "faster-whisper>=1.0",
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except subprocess.TimeoutExpired as exc:
+            partial = "\n".join(part for part in (exc.stdout, exc.stderr) if isinstance(part, str)).strip()
+            pip_tail = _tail_nonempty_lines(partial, limit=8)
+            return {
+                "returncode": 1,
+                "stdout": "faster-whisper install timed out",
+                "stderr": "\n".join(pip_tail) or "faster-whisper install exceeded the 5 minute pip timeout.",
+                "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
+                "result": {
+                    "reply_text": (
+                        "faster-whisper install exceeded the 5 minute pip timeout in this Python runtime.\n"
+                        "I did not touch provider keys or voice settings.\n"
+                        "Next: check your network or pip mirror, then rerun `/voice install faster-whisper`."
+                    ),
+                    "target": "faster-whisper",
+                    "python": sys.executable,
+                    "installed": False,
+                    "already_installed": False,
+                    "stt_ready": False,
+                    "pip_tail": pip_tail,
+                    "error_code": "voice_install_pip_timeout",
+                },
+            }
         pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         pip_tail = _tail_nonempty_lines(pip_output, limit=8)
         if completed.returncode != 0:
