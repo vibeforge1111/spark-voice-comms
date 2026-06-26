@@ -65,7 +65,9 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     _validate_profile_path(target)
     
     try:
-        raw = target.read_text(encoding="utf-8")
+        # utf-8-sig transparently strips a leading BOM if a Windows editor
+        # (Notepad, some VS Code presets) wrote one into the voice profile JSON.
+        raw = target.read_text(encoding="utf-8-sig")
     except FileNotFoundError as exc:
         raise RuntimeError(
             "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
