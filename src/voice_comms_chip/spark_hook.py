@@ -29,6 +29,25 @@ from .profile import get_provider_voice_profile, load_voice_profile, summarize_v
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
 
 DEFAULT_TRANSCRIPTION_MODEL = "whisper-1"
+
+_ALLOWED_AUDIO_MIME_TYPES: frozenset[str] = frozenset({
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/mp4",
+    "audio/x-m4a",
+})
+
+
+def _validate_mime_type(mime_type: str) -> str:
+    """Return *mime_type* if it is a known audio MIME type, else ``application/octet-stream``."""
+    if mime_type.lower() in _ALLOWED_AUDIO_MIME_TYPES:
+        return mime_type
+    logger.warning(
+        "voice.transcribe rejecting unrecognised mime_type %r; defaulting to application/octet-stream",
+        mime_type,
+    )
+    return "application/octet-stream"
 SUPPORTED_PROVIDER_KINDS = {"openai", "custom"}
 SUPPORTED_FALLBACK_MODES = {"deterministic"}
 DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL = "https://api.openai.com/v1"
@@ -899,6 +918,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     audio_bytes = _decode_transcribe_audio_base64(audio_base64)
     filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
     mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
+    mime_type = _validate_mime_type(mime_type)
     fallback_mode = _resolve_fallback_mode(payload)
     transcription_mode = _transcription_provider_mode(payload)
     if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
