@@ -81,7 +81,7 @@ def test_voice_status_local_branch_keeps_value_error_as_provider_note(tmp_path) 
         result = handle_voice_status_hook({"builder_env_file_path": str(env_file)})
 
     assert result["returncode"] == 0
-    assert "no base URL configured" in result["result"]["provider_note"]
+    assert "not configured" in result["result"]["provider_note"]
 
 
 def test_voice_status_hosted_branch_surfaces_resolve_provider_programmer_error(tmp_path) -> None:
