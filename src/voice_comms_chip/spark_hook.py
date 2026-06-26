@@ -1746,6 +1746,32 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
     )
 
 
+
+def _sanitize_instructions(raw: str) -> str:
+    """Strip prompt-injection payloads from user-supplied instructions.
+
+    User instructions are passed directly into the OpenAI Realtime WebSocket
+    session payload.  An attacker could embed override directives (e.g.
+    "ignore previous instructions", "system: ...") that would be interpreted
+    as model-level instructions.  This helper strips known injection patterns
+    while preserving legitimate voice-style guidance.
+    """
+    import re as _re
+    text = str(raw or "").strip()
+    injection_patterns = [
+        r"(?i)^\s*(?:ignore|disregard|override|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier|preceding)\s+(?:instructions?|prompts?|rules?|guidelines?)\b.*",
+        r"(?i)^\s*(?:you\s+are\s+now|from\s+now\s+on|new\s+instructions?:)\b.*",
+        r"(?i)^\s*(?:system\s*[:\-]|assistant\s*[:\-]|user\s*[:\-])\s+.*",
+        r"(?i)^\s*(?:act\s+as|pretend\s+to\s+be|roleplay\s+as)\s+.*",
+        r"(?i)^\s*(?:IMPORTANT|CRITICAL|URGENT|SECRET)\s*:\s*.*",
+        r"(?i)^\s*<\s*(?:system|instruction|prompt)\s*>.*<\s*/\s*(?:system|instruction|prompt)\s*>\s*$",
+    ]
+    for pattern in injection_patterns:
+        text = _re.sub(pattern, "", text)
+    text = _re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text if text else ""
+
+
 def _resolve_optional_float(value: Any) -> float | None:
     text = str(value or "").strip()
     if not text:
@@ -1939,7 +1965,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             },
         }
         if request.get("instructions"):
-            session_payload["session"]["instructions"] = str(request["instructions"])
+            session_payload["session"]["instructions"] = _sanitize_instructions(request.get("instructions", ""))
         reasoning_effort = str(request.get("reasoning_effort") or "").strip()
         if reasoning_effort:
             session_payload["session"]["reasoning"] = {"effort": reasoning_effort}
@@ -1950,7 +1976,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                     "type": "response.create",
                     "response": {
                         "conversation": "none",
-                        "instructions": str(request["instructions"]),
+                        "instructions": _sanitize_instructions(request.get("instructions", "")),
                         "output_modalities": ["audio"],
                         "audio": {
                             "output": {
