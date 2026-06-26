@@ -2004,6 +2004,9 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 break
     finally:
         ws.close()
+    if not audio_chunks and fallback_audio_chunks:
+        import logging
+        logging.debug("OpenAI Realtime: falling back to content_part.done audio (delta chunks empty)")
     pcm_audio = b"".join(audio_chunks or fallback_audio_chunks)
     if not pcm_audio:
         raise RuntimeError("OpenAI Realtime TTS returned empty audio.")
