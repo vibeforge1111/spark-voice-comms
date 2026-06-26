@@ -258,12 +258,14 @@ def mask_identifier(value: str | None) -> str:
     return f"{text[:4]}...{text[-4:]}"
 
 
-def json_safe(value: Any) -> str:
+def json_safe(value: Any, _depth: int = 0) -> str:
+    if _depth > 10:
+        return "[depth limit]"
     if isinstance(value, dict):
-        parts = [f"{key}:{json_safe(value[key])}" for key in sorted(value)]
+        parts = [f"{key}:{json_safe(value[key], _depth + 1)}" for key in sorted(value)]
         return "{" + ",".join(parts) + "}"
     if isinstance(value, list):
-        return "[" + ",".join(json_safe(item) for item in value) + "]"
+        return "[" + ",".join(json_safe(item, _depth + 1) for item in value) + "]"
     return str(value)
 
 
