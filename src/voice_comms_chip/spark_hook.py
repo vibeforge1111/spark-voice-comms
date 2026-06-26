@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import re
 import subprocess
 import ssl
 import sys
@@ -1736,8 +1737,50 @@ def _resolve_openai_realtime_tts_request(
     }
 
 
+_SANITIZED_INSTRUCTIONS_MAX_LEN = 500
+_INJECTION_PATTERN_RE = re.compile(
+    r"(?:"
+    r"ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+"
+    r"(?:instructions?|rules?|prompts?|directives?|constraints?)"
+    r"|"
+    r"system\s*:\s*"
+    r"|"
+    r"\[INST\]|\[/INST\]|\[INST|\|INST\]"
+    r"|"
+    r"<\|im_start\|>|<\|im_end\|>"
+    r"|"
+    r"you\s+are\s+now\s+"
+    r"|"
+    r"new\s+instructions?:"
+    r"|"
+    r"disregard\s+(?:all\s+)?(?:previous|prior|above)"
+    r"|"
+    r"override\s+(?:all\s+)?(?:instructions?|rules?|prompts?)"
+    r"|"
+    r"<\|system\|>|<\|user\|>|<\|assistant\|>"
+    r")",
+    re.IGNORECASE,
+)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_tts_instructions(raw: str) -> str:
+    """Strip injection vectors and control characters from user-supplied TTS instructions.
+
+    This prevents prompt injection via unsanitized ``instructions`` fields or
+    the ``VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS`` env var.
+    """
+    text = str(raw or "").strip()
+    text = _CONTROL_CHAR_RE.sub("", text)
+    text = _INJECTION_PATTERN_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > _SANITIZED_INSTRUCTIONS_MAX_LEN:
+        text = text[:_SANITIZED_INSTRUCTIONS_MAX_LEN].rsplit(" ", 1)[0]
+    return text
+
+
 def _openai_realtime_tts_instructions(style_instructions: str) -> str:
-    style = str(style_instructions or "").strip()
+    style = _sanitize_tts_instructions(style_instructions)
     if not style or style == DEFAULT_OPENAI_REALTIME_INSTRUCTIONS:
         return DEFAULT_OPENAI_REALTIME_INSTRUCTIONS
     return (
