@@ -2541,7 +2541,10 @@ def main() -> int:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
-    _export_runtime_state_if_configured(result)
+    try:
+        _export_runtime_state_if_configured(result)
+    except Exception:
+        pass
     _write_output(Path(args.output), result)
     return 0
 
