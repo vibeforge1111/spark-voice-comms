@@ -450,7 +450,37 @@ def _install_faster_whisper() -> dict[str, Any]:
             "install",
             "faster-whisper>=1.0",
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except subprocess.TimeoutExpired as exc:
+            partial_output = "\n".join(
+                part for part in (
+                    exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, (bytes, bytearray)) else str(exc.stdout or ""),
+                    exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, (bytes, bytearray)) else str(exc.stderr or ""),
+                ) if part
+            ).strip()
+            pip_tail = _tail_nonempty_lines(partial_output, limit=8)
+            return {
+                "returncode": 1,
+                "stdout": "faster-whisper install timed out",
+                "stderr": f"pip install exceeded {int(exc.timeout)}s without completing.",
+                "error_code": "voice_install_timeout",
+                "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
+                "result": {
+                    "reply_text": (
+                        "faster-whisper install timed out before pip finished.\n"
+                        "I did not touch provider keys or voice settings.\n"
+                        "Next: check network or pip cache, then rerun `/voice install faster-whisper`."
+                    ),
+                    "target": "faster-whisper",
+                    "python": sys.executable,
+                    "installed": False,
+                    "already_installed": False,
+                    "stt_ready": False,
+                    "pip_tail": pip_tail,
+                    "error_code": "voice_install_timeout",
+                },
+            }
         pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         pip_tail = _tail_nonempty_lines(pip_output, limit=8)
         if completed.returncode != 0:
