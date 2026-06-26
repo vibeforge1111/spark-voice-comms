@@ -2119,7 +2119,10 @@ def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
+        try:
+            env_map = _runtime_env_map(env_file_path=env_file_path)
+        except (OSError, ValueError):
+            return "tiny"
         configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
         if configured:
             return configured
