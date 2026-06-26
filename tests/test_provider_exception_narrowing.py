@@ -15,6 +15,49 @@ from voice_comms_chip.spark_hook import (
 )
 
 
+def _voice_governor_decision(hook: str) -> dict[str, object]:
+    action_id = f"action:{hook}"
+    authorization = {
+        "schema_version": "authorization-decision-v1",
+        "decision_id": f"auth:{hook}",
+        "verdict": "allow",
+        "action_id": action_id,
+        "capability_id": hook,
+        "turn_id": "turn:voice-test",
+    }
+    return {
+        "schema_version": "governor-decision-v1",
+        "decision_id": "governor:voice-test",
+        "turn_id": "turn:voice-test",
+        "outcome": "execute",
+        "envelope": {
+            "schema_version": "turn-intent-envelope-vnext",
+            "turn_id": "turn:voice-test",
+            "proposed_actions": [
+                {
+                    "action_id": action_id,
+                    "capability_id": hook,
+                    "tool_name": hook,
+                    "action_type": "local_install_or_network_voice",
+                }
+            ],
+        },
+        "authorizations": [authorization],
+        "tool_ledgers": [
+            {
+                "schema_version": "tool-call-ledger-v1",
+                "ledger_id": f"ledger:{hook}",
+                "tool_name": hook,
+                "capability_id": hook,
+                "action_id": action_id,
+                "turn_id": "turn:voice-test",
+                "authorization": authorization,
+                "result": {"status": "not_started"},
+            }
+        ],
+    }
+
+
 def test_voice_status_local_branch_surfaces_resolve_provider_programmer_error(tmp_path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("OPENAI_API_KEY=fake-openai-key-for-tests\n", encoding="utf-8")
@@ -68,7 +111,7 @@ def test_voice_speak_rejects_unexpected_resolved_provider_without_elevenlabs_fal
         side_effect=AssertionError("unexpected provider must not fall back to ElevenLabs"),
     ):
         with pytest.raises(RuntimeError, match="internal routing bug"):
-            handle_voice_speak_hook({"text": "hello"})
+            handle_voice_speak_hook({"text": "hello", "governor_decision": _voice_governor_decision("voice.speak")})
 
 
 def test_synthesize_with_pyttsx3_wraps_import_error_as_install_hint() -> None:
