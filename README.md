@@ -225,9 +225,9 @@ Add the repo as a Spark chip root and activate it from your Builder home:
 ```bash
 python -m spark_intelligence.cli attachments add-root chips "<path-to-spark-voice-comms-parent>" --home "<spark-home>"
 python -m spark_intelligence.cli attachments activate-chip spark-voice-comms --home "<spark-home>"
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.status --home "<spark-home>"
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.onboard --home "<spark-home>"
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.install --home "<spark-home>" --payload-json "{\"target\":\"kokoro\"}"
+python -m spark_intelligence.cli attachments run-hook voice.status --chip-key spark-voice-comms --home "<spark-home>"
+python -m spark_intelligence.cli attachments run-hook voice.onboard --chip-key spark-voice-comms --home "<spark-home>"
+python -m spark_intelligence.cli attachments run-hook voice.install --chip-key spark-voice-comms --home "<spark-home>" --payload-json "{\"target\":\"kokoro\"}"
 ```
 
 From Telegram, approved operators can also ask for the full local stack:
@@ -241,14 +241,14 @@ That installs local listening (`faster-whisper`) and local speaking (`kokoro-onn
 If your Builder CLI version supports `--payload-json`, you can run a deterministic local transcribe smoke without a provider:
 
 ```bash
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.transcribe --home "<spark-home>" --payload-json "{\"audio_base64\":\"ZmFrZS1hdWRpby1ieXRlcw==\",\"filename\":\"smoke.ogg\",\"mime_type\":\"audio/ogg\",\"fallback_mode\":\"deterministic\"}"
+python -m spark_intelligence.cli attachments run-hook voice.transcribe --chip-key spark-voice-comms --home "<spark-home>" --payload-json "{\"audio_base64\":\"ZmFrZS1hdWRpby1ieXRlcw==\",\"filename\":\"smoke.ogg\",\"mime_type\":\"audio/ogg\",\"fallback_mode\":\"deterministic\"}"
 ```
 
 The same payloads are available as files under [`examples/`](./examples/):
 
 ```bash
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.onboard --home "<spark-home>" --payload-file examples/voice_onboard_local.json
-python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.transcribe --home "<spark-home>" --payload-file examples/voice_transcribe_fallback.json
+python -m spark_intelligence.cli attachments run-hook voice.onboard --chip-key spark-voice-comms --home "<spark-home>" --payload-file examples/voice_onboard_local.json
+python -m spark_intelligence.cli attachments run-hook voice.transcribe --chip-key spark-voice-comms --home "<spark-home>" --payload-file examples/voice_transcribe_fallback.json
 ```
 
 ## Local Provider Setup
