@@ -1747,7 +1747,7 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
 
 
 def _resolve_optional_float(value: Any) -> float | None:
-    text = str(value or "").strip()
+    text = "" if value is None else str(value).strip()
     if not text:
         return None
     try:
