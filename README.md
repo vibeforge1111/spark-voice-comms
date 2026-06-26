@@ -8,6 +8,76 @@ License: MIT. See [LICENSE](./LICENSE).
 
 In plain English: this repo is the speech layer. Spark still decides what to say. This chip helps Spark turn audio into text and text back into audio.
 
+## Installation
+
+### Prerequisites
+
+- Python 3.10 or later
+- A Spark Builder runtime (see [Spark Intelligence](https://github.com/spark-ai/spark-intelligence))
+- Git
+
+### Quick Install
+
+```bash
+# Clone the repository
+git clone https://github.com/spark-ai/spark-voice-comms.git
+cd spark-voice-comms
+
+# Install with development dependencies
+python -m pip install -e ".[dev]"
+
+# Verify installation
+python -m pytest -q
+```
+
+### Add to Spark Builder
+
+```bash
+# Add the chip root to your Spark Builder home
+python -m spark_intelligence.cli attachments add-root chips "<path-to-spark-voice-comms-parent>" --home "<spark-home>"
+
+# Activate the chip
+python -m spark_intelligence.cli attachments activate-chip spark-voice-comms --home "<spark-home>"
+
+# Verify activation
+python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.status --home "<spark-home>"
+```
+
+### Install Voice Providers
+
+**Local/Free (recommended for privacy):**
+
+```bash
+# Install both STT and TTS
+python -m pip install -e ".[local-stt,local-tts]"
+
+# Or install Kokoro for better TTS quality
+python -m pip install -e ".[local-stt,local-kokoro]"
+```
+
+**ElevenLabs (hosted TTS):**
+
+```bash
+python -m pip install -e ".[elevenlabs]"
+```
+
+**OpenAI GPT Realtime 2:**
+
+```bash
+python -m pip install -e ".[openai-realtime]"
+```
+
+### Environment Setup
+
+Copy the example environment file and configure your providers:
+
+```bash
+cp .env.example .env
+# Edit .env with your provider keys (see Local Provider Setup section below)
+```
+
+See [.env.example](./.env.example) and [docs/VOICE_ENV_SECURITY.md](./docs/VOICE_ENV_SECURITY.md) for the full provider environment matrix and secure storage guidance.
+
 ## Start Here
 
 If you already have a Spark Telegram agent with this chip attached, you should not need to read code or paste keys into chat. Ask your agent:

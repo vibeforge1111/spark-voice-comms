@@ -8,9 +8,62 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILE_PATH = PROJECT_ROOT / "voices" / "spark_core.voice_profile.json"
 
+# Allowed directories for profile loading
+ALLOWED_DIRECTORIES = [
+    PROJECT_ROOT / "voices",
+    PROJECT_ROOT,
+]
+
+
+def _validate_profile_path(path: Path) -> Path:
+    """Validate that a profile path is within allowed directories.
+    
+    Prevents path traversal attacks by ensuring the resolved path
+    stays within the voices directory or project root.
+    
+    Args:
+        path: The path to validate
+        
+    Returns:
+        The resolved, validated path
+        
+    Raises:
+        ValueError: If the path is outside allowed directories
+    """
+    resolved_path = path.resolve()
+    
+    # Check if path is within any allowed directory
+    for allowed_dir in ALLOWED_DIRECTORIES:
+        try:
+            resolved_path.relative_to(allowed_dir)
+            return resolved_path
+        except ValueError:
+            continue
+    
+    raise ValueError(
+        f"Profile path '{path}' is outside allowed directories. "
+        f"Only paths within {', '.join(str(d) for d in ALLOWED_DIRECTORIES)} are permitted."
+    )
+
 
 def load_voice_profile(path: str | None = None) -> dict[str, Any]:
+    """Load a voice profile from a JSON file.
+    
+    Args:
+        path: Optional path to profile file. Must be within allowed directories.
+        
+    Returns:
+        Dictionary containing the voice profile data.
+        
+    Raises:
+        RuntimeError: If the profile file cannot be read or is invalid JSON.
+        ValueError: If the path is outside allowed directories.
+    """
     target = Path(path) if path else DEFAULT_PROFILE_PATH
+    
+    # Validate path to prevent traversal attacks
+    _validate_profile_path(target)
+    
     try:
         raw = target.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -18,7 +71,13 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
             "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
             "profile path to load_voice_profile()."
         ) from exc
-    payload = json.loads(raw)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Voice profile at '{target}' contains invalid JSON. "
+            "Reinstall the voice-comms chip or fix the profile file."
+        ) from exc
     if not isinstance(payload, dict):
         raise ValueError("Voice profile must be a JSON object.")
     return payload
