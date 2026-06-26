@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import ssl
 import sys
 import tempfile
 import time
@@ -73,6 +74,10 @@ ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
 MAX_HOOK_INPUT_BYTES = 1_000_000
 MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
+MAX_PROVIDER_AUDIO_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_PROVIDER_JSON_RESPONSE_BYTES = 1 * 1024 * 1024    # 1 MB
+MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
+MAX_WEBSOCKET_MESSAGE_BYTES = 10 * 1024 * 1024         # 10 MB per message
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_ENV_KEYS = {
@@ -114,9 +119,76 @@ class _PublicHookInputError(ValueError):
         self.error_code = error_code
 
 
+def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
+    """Verify a native voice hook is bound to a Governor decision and tool ledger."""
+    authority = (
+        payload.get("governor_decision")
+        or payload.get("governorDecision")
+        or payload.get("execution_authority")
+        or payload.get("executionAuthority")
+    )
+    if not isinstance(authority, dict):
+        raise ValueError(f"{hook} requires Harness Core Governor authority.")
+    if authority.get("schema_version") != "governor-decision-v1":
+        raise ValueError(f"{hook} requires a governor-decision-v1 authority envelope.")
+    if authority.get("outcome") not in {"execute", "read_only"}:
+        raise ValueError(f"{hook} requires an executable Governor decision.")
+
+    envelope = authority.get("envelope") if isinstance(authority.get("envelope"), dict) else {}
+    actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
+    ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
+    authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
+            continue
+        action_id = str(action.get("action_id") or "").strip()
+        if not action_id:
+            continue
+        auth_ok = any(
+            isinstance(item, dict)
+            and item.get("verdict") == "allow"
+            and str(item.get("action_id") or "").strip() == action_id
+            for item in authorizations
+        )
+        ledger_ok = any(
+            isinstance(item, dict)
+            and str(item.get("tool_name") or "").strip() == hook
+            and str(item.get("action_id") or "").strip() == action_id
+            and (
+                (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
+                or auth_ok
+            )
+            for item in ledgers
+        )
+        if auth_ok and ledger_ok:
+            return authority
+
+    raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
+
+
+def _unknown_profile_summary() -> dict[str, Any]:
+    """Profile-summary shape used when the voice profile cannot be loaded."""
+    return {
+        "profile_name": "unknown",
+        "tone_identity": "unknown",
+        "default_emotion": "unknown",
+        "barge_in_enabled": False,
+        "streaming_reply_default": False,
+        "provider_voice_ids": [],
+    }
+
+
 def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
     status = _build_voice_status(payload)
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError as exc:
+        profile_summary = _unknown_profile_summary()
+        existing_reason = status.get("reason", "voice status error")
+        status["reason"] = f"{existing_reason}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
         local_tts_ready = bool(status.get("local_tts_ready"))
@@ -180,7 +252,10 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile_summary = summarize_voice_profile(load_voice_profile())
+    try:
+        profile_summary = summarize_voice_profile(load_voice_profile())
+    except RuntimeError:
+        profile_summary = _unknown_profile_summary()
     reply_text = (
         "Telegram voice plan:\n"
         "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
@@ -263,8 +338,9 @@ def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    target = str(payload.get("target") or payload.get("provider") or "kokoro").strip().lower()
-    target = target.replace("_", "-")
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
+    raw_target = str(payload.get("target") or payload.get("provider") or "kokoro").strip()
+    target = raw_target.lower().replace("_", "-")
     if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
         return _install_local_voice_stack(payload)
     if target in {"stt", "local-stt", "transcription", "transcribe", "whisper", "faster-whisper"}:
@@ -272,7 +348,12 @@ def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
     if target in {"local-tts", "kokoro-onnx"}:
         target = LOCAL_KOKORO_TTS_PROVIDER
     if target != LOCAL_KOKORO_TTS_PROVIDER:
-        raise ValueError("voice.install supports `kokoro`, `faster-whisper`, or `local`.")
+        raise ValueError(
+            f"voice.install does not recognize target {raw_target!r}. "
+            "Supported targets: `kokoro` (aliases: `local-tts`, `kokoro-onnx`), "
+            "`faster-whisper` (aliases: `stt`, `local-stt`, `transcription`, `transcribe`, `whisper`), "
+            "or `local` (aliases: `local-voice`, `local-stack`, `local-voice-stack`)."
+        )
     return _install_kokoro(payload)
 
 
@@ -320,7 +401,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
             return {
                 "returncode": 1,
                 "stdout": "kokoro install failed",
-                "stderr": "\n".join(pip_tail),
+                "stderr": "Package install failed",
                 "metrics": {"installed": 0, "already_installed": 0},
                 "result": {
                     "reply_text": (
@@ -332,7 +413,6 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
                     "python": sys.executable,
                     "installed": False,
                     "already_installed": False,
-                    "pip_tail": pip_tail,
                 },
             }
         install_status = "installed"
@@ -377,7 +457,7 @@ def _install_faster_whisper() -> dict[str, Any]:
             return {
                 "returncode": 1,
                 "stdout": "faster-whisper install failed",
-                "stderr": "\n".join(pip_tail),
+                "stderr": "Package install failed",
                 "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
                 "result": {
                     "reply_text": (
@@ -390,7 +470,6 @@ def _install_faster_whisper() -> dict[str, Any]:
                     "installed": False,
                     "already_installed": False,
                     "stt_ready": False,
-                    "pip_tail": pip_tail,
                 },
             }
         install_status = "installed"
@@ -746,7 +825,11 @@ def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, An
 
 
 def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    profile = load_voice_profile()
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
+    try:
+        profile = load_voice_profile()
+    except RuntimeError:
+        profile = {"profile_name": "unknown", "provider_voices": {}}
     profile_summary = summarize_voice_profile(profile)
     request = _resolve_tts_request(payload, profile=profile)
     synthesize_started = time.perf_counter()
@@ -808,6 +891,7 @@ def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    assertNativeGovernorHarnessAuthority(payload, hook="voice.transcribe")
     transcribe_started = time.perf_counter()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
     if not audio_base64:
@@ -1691,9 +1775,28 @@ def _resolve_optional_float(value: Any) -> float | None:
     if not text:
         return None
     try:
-        return float(text)
-    except ValueError:
+        result = float(text)
+        # Reject NaN and Inf — they propagate through min/max and cause crashes
+        if result != result or abs(result) == float("inf"):
+            return None
+        return result
+    except (ValueError, OverflowError):
         return None
+
+
+_ELEVENLABS_ALLOWED_HOSTS: frozenset[str] = frozenset({
+    "api.elevenlabs.io",
+})
+
+
+def _validate_elevenlabs_base_url(base_url: str) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    if host not in _ELEVENLABS_ALLOWED_HOSTS:
+        raise ValueError(
+            f"ElevenLabs base_url host '{host}' is not in the permitted allowlist. "
+            f"Allowed: {sorted(_ELEVENLABS_ALLOWED_HOSTS)}"
+        )
 
 
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
@@ -1702,6 +1805,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
         raise ValueError(
             f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
         )
+    _validate_elevenlabs_base_url(str(request["base_url"]))
     retried_with_fallback = False
     while True:
         base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
@@ -1727,12 +1831,12 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
         )
         try:
             with urllib.request.urlopen(req, timeout=45) as response:
-                audio_bytes = response.read()
+                audio_bytes = _read_response_bounded(response, max_bytes=MAX_PROVIDER_AUDIO_RESPONSE_BYTES)
             if not audio_bytes:
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            detail = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode("utf-8", errors="ignore") if exc.fp else str(exc)
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -1802,9 +1906,9 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     model_path = Path(raw_model_path)
     voices_path = Path(raw_voices_path)
     if not model_path.exists():
-        raise RuntimeError(f"Kokoro model file was not found at '{model_path}'.")
+        raise RuntimeError("Kokoro model file was not found")
     if not voices_path.exists():
-        raise RuntimeError(f"Kokoro voices file was not found at '{voices_path}'.")
+        raise RuntimeError("Kokoro voices file was not found")
     kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
     samples, sample_rate = kokoro.create(
         request["text"],
@@ -1836,7 +1940,15 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     headers = [
         "Authorization: Bearer " + str(request["secret_value"]),
     ]
-    ws = websocket.create_connection(url, header=headers, timeout=timeout)
+    # Enforce a per-frame size cap at the library level so an oversized frame is
+    # rejected during recv() rather than buffered into memory first (OOM guard).
+    ws = websocket.create_connection(
+        url,
+        header=headers,
+        timeout=timeout,
+        max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+        sslopt={"cert_reqs": ssl.CERT_REQUIRED},
+    )
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
     try:
@@ -1889,6 +2001,13 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             raw_message = ws.recv()
             if not raw_message:
                 continue
+            # Defensive second line of defense behind the connect-time max_size:
+            # reject oversized text or binary frames before they are parsed.
+            if isinstance(raw_message, (str, bytes, bytearray)) and len(raw_message) > MAX_WEBSOCKET_MESSAGE_BYTES:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS websocket message exceeds size limit "
+                    f"({len(raw_message)} > {MAX_WEBSOCKET_MESSAGE_BYTES} bytes)"
+                )
             try:
                 event = json.loads(raw_message)
             except json.JSONDecodeError as exc:
@@ -1956,7 +2075,7 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(_read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES).decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning(
             "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
@@ -2134,6 +2253,29 @@ def _transcribe_with_provider(
     return transcript_text
 
 
+def _read_response_bounded(response, *, max_bytes: int) -> bytes:
+    """Read an HTTP response body up to max_bytes to prevent OOM from malicious providers."""
+    chunks: list[bytes] = []
+    total_read = 0
+    while True:
+        chunk_size = min(max_bytes - total_read, 65536)
+        if chunk_size <= 0:
+            # Reached the limit; verify there is no more data.
+            peek = response.read(1)
+            if peek:
+                raise RuntimeError(
+                    f"Provider response exceeded maximum allowed size of {max_bytes} bytes; "
+                    "possible malicious or compromised provider."
+                )
+            break
+        chunk = response.read(chunk_size)
+        if not chunk:
+            break
+        total_read += len(chunk)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _reject_multipart_crlf(label: str, value: str) -> None:
     if "\r" in value or "\n" in value:
         raise ValueError(f"{label} must not contain CR or LF characters")
@@ -2184,9 +2326,9 @@ def _post_multipart(
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            return response.read()
+            return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
+        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
@@ -2211,6 +2353,60 @@ def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     return ""
 
 
+_PRIVATE_HOSTS = frozenset({
+    "169.254.169.254",  # AWS/GCP/Azure metadata
+    "metadata.google.internal",
+    "metadata.google.com",
+})
+
+
+def _validate_outbound_url(url: str) -> None:
+    """Reject URLs that target private/reserved networks (SSRF protection).
+
+    Raises ValueError if the URL targets a private IP, cloud metadata service,
+    or uses a non-HTTP(S) scheme.
+    """
+    import ipaddress as _ipaddress
+
+    parsed = urllib.parse.urlparse(str(url).strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+
+    if scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme must be http or https, got '{scheme}'.")
+    if not host:
+        raise ValueError("URL host is required.")
+    if host in _PRIVATE_HOSTS:
+        raise ValueError(f"URL host '{host}' is a private/metadata endpoint.")
+
+    # Parse the host as a literal IP. A parse failure means it is a hostname
+    # (not an IP literal) and is acceptable here; only the *parse* may be
+    # swallowed. The private/reserved rejection must escape, so the check
+    # happens OUTSIDE the try/except below.
+    addr = None
+    candidate = host
+    # Strip IPv6 zone id and unwrap an IPv4-mapped IPv6 form so the literal
+    # parses and the underlying private/reserved IP is still inspected.
+    if "%" in candidate:
+        candidate = candidate.split("%", 1)[0]
+    try:
+        addr = _ipaddress.ip_address(candidate)
+    except ValueError:
+        addr = None  # hostname, not a literal IP — OK
+    if addr is not None:
+        mapped = getattr(addr, "ipv4_mapped", None)
+        if mapped is not None:
+            addr = mapped
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_unspecified
+        ):
+            raise ValueError(f"URL host '{host}' is a non-public IP address.")
+
+
 def _join_url(base_url: str, suffix: str) -> str:
     """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
     if not isinstance(base_url, str) or not base_url.strip():
@@ -2221,6 +2417,7 @@ def _join_url(base_url: str, suffix: str) -> str:
     parsed = urllib.parse.urlparse(clean_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("base_url must use an http or https URL with a host")
+    _validate_outbound_url(clean_base)
     return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
