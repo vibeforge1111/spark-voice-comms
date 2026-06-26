@@ -353,6 +353,8 @@ Implemented in this repo:
 
 - `voice.status`
 - `voice.plan`
+- `voice.onboard`
+- `voice.install`
 - `voice.transcribe`
 - `voice.speak`
 - local deterministic fallback transcripts
