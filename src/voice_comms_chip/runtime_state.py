@@ -230,7 +230,7 @@ def _claim_levels(
     tts: dict[str, Any],
     delivery: dict[str, Any],
 ) -> dict[str, bool]:
-    configured = stt["provider_id"] != "none" or tts["provider_id"] != "none"
+    configured = stt.get("provider_id", "none") != "none" or tts["provider_id"] != "none"
     synthesis_ready = bool(tts["ready"])
     delivery_ready = bool(delivery["ready"])
     conversation_ready = bool(stt["ready"] and synthesis_ready and delivery_ready)
