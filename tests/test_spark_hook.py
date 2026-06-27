@@ -839,6 +839,40 @@ def test_voice_transcribe_auto_requires_local_faster_whisper_when_local_is_unava
             handle_voice_transcribe_hook(payload)
 
 
+def test_voice_transcribe_auto_honors_deterministic_fallback_when_local_is_unavailable(tmp_path):
+    payload = _payload(
+        tmp_path,
+        audio_base64=base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        filename="telegram-voice.ogg",
+        mime_type="audio/ogg",
+        fallback_mode="deterministic",
+    )
+    Path(payload["builder_env_file_path"]).write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                "VOICE_TRANSCRIBE_PROVIDER=auto",
+                "VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY",
+                "VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
+        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        side_effect=AssertionError("deterministic fallback must not make any hosted transcription call"),
+    ):
+        result = handle_voice_transcribe_hook(payload)
+
+    assert result["returncode"] == 0
+    assert result["result"]["provider_id"] == "deterministic_fallback"
+    assert result["result"]["mode"] == "deterministic_fallback"
+    assert result["metrics"]["fallback_used"] == 1
+    assert "deterministic fallback requested" in result["result"]["fallback_reason"]
+
+
 def test_voice_transcribe_rejects_malformed_audio_base64_before_provider_checks(tmp_path):
     raw_payload = "!!!!/tmp/private-audio.ogg/sk-live-secret"
     payload = _payload(
