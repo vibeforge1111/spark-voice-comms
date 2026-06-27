@@ -1867,7 +1867,8 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
         soundfile = importlib.import_module("soundfile")
-    except ImportError as exc:
+    except Exception as _e:
+        import logging as _log; _log.getLogger(__name__).warning("Suppressed: %s", _e, exc_info=True)
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
     raw_model_path = str(request.get("model_path") or "").strip()
     raw_voices_path = str(request.get("voices_path") or "").strip()
