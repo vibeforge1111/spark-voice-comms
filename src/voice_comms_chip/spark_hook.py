@@ -1850,7 +1850,24 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
                     engine.setProperty("voice", voice_id)
                     break
         engine.save_to_file(request["text"], temp_path)
-        engine.runAndWait()
+        import threading
+        run_done = threading.Event()
+        def _run_blocking() -> None:
+            try:
+                engine.runAndWait()
+            finally:
+                run_done.set()
+        run_thread = threading.Thread(target=_run_blocking, name="pyttsx3-runandwait", daemon=True)
+        run_thread.start()
+        if not run_done.wait(timeout=PYTTSX3_RUNANDWAIT_TIMEOUT_SECONDS):
+            try:
+                engine.stop()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Local pyttsx3 TTS exceeded {PYTTSX3_RUNANDWAIT_TIMEOUT_SECONDS}s while waiting on engine.runAndWait(). "
+                "The local TTS driver is hung; retry after restarting the host audio service or switching to another provider."
+            )
         audio_bytes = Path(temp_path).read_bytes()
         if not audio_bytes:
             raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
