@@ -1969,7 +1969,12 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        deadline = time.monotonic() + timeout
         while True:
+            if time.monotonic() > deadline:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS timed out after {timeout}s waiting for response.done"
+                )
             raw_message = ws.recv()
             if not raw_message:
                 continue
