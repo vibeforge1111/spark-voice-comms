@@ -613,7 +613,8 @@ def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     try:
         return _runtime_env_map(env_file_path=env_file_path or None)
-    except (OSError, ValueError):
+    except Exception as _e:
+        import logging as _log; _log.getLogger(__name__).warning("Suppressed: %s", _e, exc_info=True)
         return _process_voice_env_map()
 
 
