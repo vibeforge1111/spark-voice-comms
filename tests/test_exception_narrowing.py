@@ -8,6 +8,7 @@ from voice_comms_chip.spark_hook import (
     _safe_builder_env_map,
     _transcription_provider_mode,
     _build_voice_status,
+    _is_allowed_env_file_path,
 )
 
 
@@ -15,6 +16,7 @@ from voice_comms_chip.spark_hook import (
 
 def test_safe_builder_env_map_oserror_falls_back():
     with patch("voice_comms_chip.spark_hook._runtime_env_map", side_effect=OSError("disk full")), \
+         patch("voice_comms_chip.spark_hook._is_allowed_env_file_path", return_value=True), \
          patch("voice_comms_chip.spark_hook._process_voice_env_map", return_value={"FALLBACK": "yes"}):
         result = _safe_builder_env_map({"builder_env_file_path": "/bad/path/.env"})
     assert result == {"FALLBACK": "yes"}
@@ -22,13 +24,15 @@ def test_safe_builder_env_map_oserror_falls_back():
 
 def test_safe_builder_env_map_valueerror_falls_back():
     with patch("voice_comms_chip.spark_hook._runtime_env_map", side_effect=ValueError("bad encoding")), \
+         patch("voice_comms_chip.spark_hook._is_allowed_env_file_path", return_value=True), \
          patch("voice_comms_chip.spark_hook._process_voice_env_map", return_value={"PROCESS": "env"}):
         result = _safe_builder_env_map({"builder_env_file_path": "/bad/.env"})
     assert result == {"PROCESS": "env"}
 
 
 def test_safe_builder_env_map_keyboardinterrupt_propagates():
-    with patch("voice_comms_chip.spark_hook._runtime_env_map", side_effect=KeyboardInterrupt):
+    with patch("voice_comms_chip.spark_hook._runtime_env_map", side_effect=KeyboardInterrupt), \
+         patch("voice_comms_chip.spark_hook._is_allowed_env_file_path", return_value=True):
         try:
             _safe_builder_env_map({"builder_env_file_path": "/some/.env"})
             assert False, "KeyboardInterrupt should have propagated"
@@ -115,3 +119,21 @@ def test_build_voice_status_env_merge_valueerror_guarded(tmp_path):
 
     assert result.get("ready") is True
     assert result.get("local_ready") is True
+
+
+# ── _is_allowed_env_file_path ─────────────────────────────────────
+
+def test_allowed_env_file_path_rejects_etc_passwd():
+    assert _is_allowed_env_file_path("/etc/passwd") is False
+
+
+def test_allowed_env_file_path_rejects_etc_shadow():
+    assert _is_allowed_env_file_path("/etc/shadow") is False
+
+
+def test_allowed_env_file_path_rejects_absolute_outside_roots():
+    assert _is_allowed_env_file_path("/tmp/secrets.env") is False
+
+
+def test_allowed_env_file_path_rejects_dot_dot_traversal():
+    assert _is_allowed_env_file_path("~/.spark/../../etc/passwd") is False
