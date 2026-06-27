@@ -1866,9 +1866,19 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
 def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
+    except ImportError as exc:
+        raise RuntimeError(
+            "Kokoro TTS requires optional package `kokoro-onnx`. "
+            "Install it (`pip install kokoro-onnx>=0.5.0`) and retry."
+        ) from exc
+    try:
         soundfile = importlib.import_module("soundfile")
     except ImportError as exc:
-        raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
+        raise RuntimeError(
+            "Kokoro TTS requires optional package `soundfile` to write the WAV output. "
+            "Install it (`pip install soundfile>=0.12`) and retry. "
+            "On macOS you may also need to install `libsndfile` via Homebrew."
+        ) from exc
     raw_model_path = str(request.get("model_path") or "").strip()
     raw_voices_path = str(request.get("voices_path") or "").strip()
     if not raw_model_path:
