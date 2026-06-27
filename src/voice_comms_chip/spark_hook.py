@@ -2198,6 +2198,9 @@ def _transcribe_with_local_faster_whisper(
                 pass
 
 
+_TRANSCRIPTION_ALLOWED_HOSTS: frozenset[str] = frozenset({"api.openai.com"})
+
+
 def _transcribe_with_provider(
     *,
     provider: dict[str, str],
@@ -2205,6 +2208,12 @@ def _transcribe_with_provider(
     filename: str,
     mime_type: str,
 ) -> str:
+    _t_parsed = urllib.parse.urlparse(str(provider.get("base_url") or ""))
+    if _t_parsed.scheme not in {"https"} or (_t_parsed.hostname or "").lower() not in _TRANSCRIPTION_ALLOWED_HOSTS:
+        raise ValueError(
+            f"Transcription provider base_url hostname '{_t_parsed.hostname}' is not in the "
+            "permitted allowlist. Only api.openai.com over https is allowed."
+        )
     payload = _post_multipart(
         _join_url(provider["base_url"], "audio/transcriptions"),
         headers={"Authorization": f"Bearer {provider['secret_value']}"},
