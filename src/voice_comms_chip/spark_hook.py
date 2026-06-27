@@ -1994,12 +1994,18 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             if event_type == "response.output_audio.delta":
                 delta = str(event.get("delta") or "")
                 if delta:
-                    audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+                    try:
+                        audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+                    except (binascii.Error, UnicodeEncodeError):
+                        pass
             elif event_type == "response.content_part.done":
                 part = event.get("part") if isinstance(event.get("part"), dict) else {}
                 audio = str(part.get("audio") or "")
                 if audio:
-                    fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+                    try:
+                        fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+                    except (binascii.Error, UnicodeEncodeError):
+                        pass
             elif event_type == "response.done":
                 break
     finally:
