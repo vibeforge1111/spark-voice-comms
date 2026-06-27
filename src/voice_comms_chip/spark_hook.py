@@ -1055,6 +1055,9 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             "provider_id": "local_faster_whisper",
             "provider_kind": "local",
             "model": _resolve_local_faster_whisper_model(payload),
+            "provider_note": None,
+            "hosted_provider_id": None,
+            "hosted_provider_kind": None,
         }
     if local_stt_ready and transcription_mode in {"auto", "local"}:
         provider_note = (
@@ -1105,6 +1108,10 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             "provider_id": None,
             "provider_kind": None,
             "model": None,
+            "speech_reply_status": None,
+            "provider_note": None,
+            "hosted_provider_id": None,
+            "hosted_provider_kind": None,
         }
     if provider["provider_kind"] == "custom":
         return {
@@ -1122,6 +1129,10 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             "provider_id": provider["provider_id"],
             "provider_kind": provider["provider_kind"],
             "model": DEFAULT_TRANSCRIPTION_MODEL,
+            "speech_reply_status": None,
+            "provider_note": "Custom provider transcription compatibility is not verified yet.",
+            "hosted_provider_id": None,
+            "hosted_provider_kind": None,
         }
     return {
         "ready": True,
@@ -1139,6 +1150,10 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         "provider_id": provider["provider_id"],
         "provider_kind": provider["provider_kind"],
         "model": DEFAULT_TRANSCRIPTION_MODEL,
+        "speech_reply_status": None,
+        "provider_note": None,
+        "hosted_provider_id": None,
+        "hosted_provider_kind": None,
     }
 
 
