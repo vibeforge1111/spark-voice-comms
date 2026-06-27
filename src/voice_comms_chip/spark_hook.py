@@ -1331,6 +1331,9 @@ def _missing_voice_secret_message(context: str) -> str:
     )
 
 
+_VOICE_ENV_FILE_ALLOWED_BASE: "Path" = Path(os.environ.get("SPARK_VOICE_RUNTIME_ROOT", str(Path.home()))).resolve()
+
+
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
     dedicated_provider = _resolve_dedicated_transcription_provider(payload)
     if dedicated_provider is not None:
@@ -1437,7 +1440,13 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
-    path = Path(env_file_path)
+    path = Path(env_file_path).resolve()
+    try:
+        path.relative_to(_VOICE_ENV_FILE_ALLOWED_BASE)
+    except ValueError:
+        raise ValueError(
+            f"Builder env file path '{env_file_path}' is outside the permitted runtime root."
+        )
     if not path.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
