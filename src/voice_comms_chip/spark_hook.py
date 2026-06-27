@@ -1705,6 +1705,11 @@ def _resolve_openai_realtime_tts_request(
     secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
     if not secret_env_ref:
         raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
+    if secret_env_ref not in VOICE_ENV_KEYS:
+        raise ValueError(
+            f"voice.speak OpenAI Realtime secret_env_ref '{secret_env_ref}' is not in the "
+            "permitted env-var allowlist."
+        )
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
