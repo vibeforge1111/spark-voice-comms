@@ -25,6 +25,18 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+def _str_bool(value: Any) -> bool:
+    """String-aware bool conversion.
+
+    ``bool("false")`` returns ``True`` because any non-empty string is
+    truthy in Python.  This helper treats the strings ``"false"``,
+    ``"0"``, ``"no"``, and ``""`` as *False* while delegating all other
+    values to the built-in ``bool()``.
+    """
+    if isinstance(value, str):
+        return value.lower() not in ("false", "0", "no", "")
+    return bool(value)
+
 from .profile import get_provider_voice_profile, load_voice_profile, summarize_voice_profile
 from .runtime_state import state_from_speak, state_from_status, state_from_transcribe
 
@@ -191,7 +203,7 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
         status["reason"] = f"{existing_reason}. Profile unavailable: {exc}"
     runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
     if status.get("local_ready"):
-        local_tts_ready = bool(status.get("local_tts_ready"))
+        local_tts_ready = _str_bool(status.get("local_tts_ready"))
         profile_name = str(profile_summary["profile_name"])
         tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
         lines = [
@@ -497,9 +509,9 @@ def _install_local_voice_stack(payload: dict[str, Any]) -> dict[str, Any]:
     ok = stt.get("returncode") == 0 and kokoro.get("returncode") == 0
     stt_result = stt.get("result") if isinstance(stt.get("result"), dict) else {}
     kokoro_result = kokoro.get("result") if isinstance(kokoro.get("result"), dict) else {}
-    stt_ready = bool(stt_result.get("stt_ready"))
-    kokoro_installed = bool(kokoro_result.get("installed"))
-    kokoro_ready = bool(kokoro_result.get("kokoro_ready"))
+    stt_ready = _str_bool(stt_result.get("stt_ready"))
+    kokoro_installed = _str_bool(kokoro_result.get("installed"))
+    kokoro_ready = _str_bool(kokoro_result.get("kokoro_ready"))
     reply_lines = [
         "Local voice package install completed." if ok else "Local voice package install partly failed.",
         f"Listening: {'ready via faster-whisper' if stt_ready else 'faster-whisper still needs attention'}.",
