@@ -72,6 +72,7 @@ ENV_OPENAI_REALTIME_INSTRUCTIONS = "VOICE_TTS_OPENAI_REALTIME_INSTRUCTIONS"
 ENV_OPENAI_REALTIME_TIMEOUT_SECONDS = "VOICE_TTS_OPENAI_REALTIME_TIMEOUT_SECONDS"
 ENV_RUNTIME_STATE_PATH = "SPARK_VOICE_RUNTIME_STATE_PATH"
 MAX_HOOK_INPUT_BYTES = 1_000_000
+MAX_TTS_TEXT_LENGTH = 10_000
 MAX_TRANSCRIBE_AUDIO_BYTES = 25 * 1024 * 1024
 MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES = 64 * 1024
 MAX_PROVIDER_AUDIO_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
@@ -1564,6 +1565,11 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     text = str(payload.get("text") or "").strip()
     if not text:
         raise ValueError("voice.speak requires non-empty text.")
+    if len(text) > MAX_TTS_TEXT_LENGTH:
+        raise ValueError(
+            f"voice.speak text exceeds maximum length of {MAX_TTS_TEXT_LENGTH:,} characters "
+            f"(received {len(text):,}). Truncate or split the text before calling voice.speak."
+        )
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
