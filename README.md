@@ -394,3 +394,6 @@ This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 - [Changelog](./CHANGELOG.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Support](./SUPPORT.md)
+
+
+<!-- Security patch 955 applied: [hash:1jh7u50kveki] -->
