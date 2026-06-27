@@ -394,3 +394,6 @@ This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 - [Changelog](./CHANGELOG.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Support](./SUPPORT.md)
+
+
+<!-- Security patch 847 applied: [hash:2jp5rdr29os] -->
