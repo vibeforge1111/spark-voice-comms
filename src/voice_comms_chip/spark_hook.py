@@ -1032,8 +1032,8 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            logger.warning("voice-comms: failed to read builder env file %s: %s", env_file_path, exc)
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
@@ -1910,7 +1910,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     sample_rate = int(request.get("sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
     timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
     headers = [
-        "Authorization: Bearer " + str(request["secret_value"]),
+        f"Authorization: Bearer {request['secret_value']}",
     ]
     # Enforce a per-frame size cap at the library level so an oversized frame is
     # rejected during recv() rather than buffered into memory first (OOM guard).
@@ -2053,6 +2053,9 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
             "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
             exc,
         )
+        logger.exception(
+            "voice-comms: elevenlabs voice-list fetch failed unexpectedly",
+        )
         return None
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list) or not voices:
@@ -2191,6 +2194,10 @@ def _transcribe_with_local_faster_whisper(
             raise ValueError("Local faster-whisper returned no transcript text.")
         return text
     finally:
+        try:
+            del model
+        except NameError:
+            pass
         if temp_path:
             try:
                 os.unlink(temp_path)
@@ -2420,7 +2427,7 @@ def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
         raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
     if not isinstance(payload, dict):
         raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
