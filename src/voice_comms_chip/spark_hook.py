@@ -492,49 +492,54 @@ def _install_faster_whisper() -> dict[str, Any]:
 
 
 def _install_local_voice_stack(payload: dict[str, Any]) -> dict[str, Any]:
-    stt = _install_faster_whisper()
-    kokoro = _install_kokoro(payload)
-    ok = stt.get("returncode") == 0 and kokoro.get("returncode") == 0
-    stt_result = stt.get("result") if isinstance(stt.get("result"), dict) else {}
-    kokoro_result = kokoro.get("result") if isinstance(kokoro.get("result"), dict) else {}
-    stt_ready = bool(stt_result.get("stt_ready"))
-    kokoro_installed = bool(kokoro_result.get("installed"))
-    kokoro_ready = bool(kokoro_result.get("kokoro_ready"))
-    reply_lines = [
-        "Local voice package install completed." if ok else "Local voice package install partly failed.",
-        f"Listening: {'ready via faster-whisper' if stt_ready else 'faster-whisper still needs attention'}.",
-        f"Speaking: {'Kokoro ready with local voice files' if kokoro_ready else 'Kokoro package installed; local voice files may still need connecting' if kokoro_installed else 'Kokoro still needs attention'}.",
-        "",
-        "Next: rerun `/voice onboard local`, then `/voice`.",
-    ]
-    return {
-        "returncode": 0 if ok else 1,
-        "stdout": "local_installed" if ok else "local_install_partial",
-        "stderr": "\n".join(
-            line
-            for result in (stt, kokoro)
-            for line in _tail_nonempty_lines(str(result.get("stderr") or ""), limit=4)
-        ),
-        "metrics": {
-            "installed": 1 if stt_ready and kokoro_installed else 0,
-            "stt_ready": 1 if stt_ready else 0,
-            "kokoro_installed": 1 if kokoro_installed else 0,
-            "kokoro_ready": 1 if kokoro_ready else 0,
-        },
-        "result": {
-            "reply_text": "\n".join(reply_lines),
-            "target": "local",
-            "python": sys.executable,
-            "installed": bool(stt_ready and kokoro_installed),
-            "stt_ready": stt_ready,
-            "kokoro_installed": kokoro_installed,
-            "kokoro_ready": kokoro_ready,
-            "stt": stt_result,
-            "kokoro": kokoro_result,
-        },
-    }
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        stt = _install_faster_whisper()
+        kokoro = _install_kokoro(payload)
+        ok = stt.get("returncode") == 0 and kokoro.get("returncode") == 0
+        stt_result = stt.get("result") if isinstance(stt.get("result"), dict) else {}
+        kokoro_result = kokoro.get("result") if isinstance(kokoro.get("result"), dict) else {}
+        stt_ready = bool(stt_result.get("stt_ready"))
+        kokoro_installed = bool(kokoro_result.get("installed"))
+        kokoro_ready = bool(kokoro_result.get("kokoro_ready"))
+        reply_lines = [
+            "Local voice package install completed." if ok else "Local voice package install partly failed.",
+            f"Listening: {'ready via faster-whisper' if stt_ready else 'faster-whisper still needs attention'}.",
+            f"Speaking: {'Kokoro ready with local voice files' if kokoro_ready else 'Kokoro package installed; local voice files may still need connecting' if kokoro_installed else 'Kokoro still needs attention'}.",
+            "",
+            "Next: rerun `/voice onboard local`, then `/voice`.",
+        ]
+        return {
+            "returncode": 0 if ok else 1,
+            "stdout": "local_installed" if ok else "local_install_partial",
+            "stderr": "\n".join(
+                line
+                for result in (stt, kokoro)
+                for line in _tail_nonempty_lines(str(result.get("stderr") or ""), limit=4)
+            ),
+            "metrics": {
+                "installed": 1 if stt_ready and kokoro_installed else 0,
+                "stt_ready": 1 if stt_ready else 0,
+                "kokoro_installed": 1 if kokoro_installed else 0,
+                "kokoro_ready": 1 if kokoro_ready else 0,
+            },
+            "result": {
+                "reply_text": "\n".join(reply_lines),
+                "target": "local",
+                "python": sys.executable,
+                "installed": bool(stt_ready and kokoro_installed),
+                "stt_ready": stt_ready,
+                "kokoro_installed": kokoro_installed,
+                "kokoro_ready": kokoro_ready,
+                "stt": stt_result,
+                "kokoro": kokoro_result,
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def _voice_onboarding_reply_text(
     *,
     recommended_path: str,
@@ -542,106 +547,130 @@ def _voice_onboarding_reply_text(
     provider_note: dict[str, str],
     preference_note: dict[str, str],
 ) -> str:
-    context_line = _voice_context_line(provider_note=provider_note, preference_note=preference_note)
-    next_step = _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot)
-    if recommended_path == "local_free":
-        if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-            voice_name = "Kokoro" if snapshot["local_tts"].get("provider") == LOCAL_KOKORO_TTS_PROVIDER else "the local system voice"
+    if not isinstance(recommended_path, str): recommended_path = str(recommended_path or '')
+    if not isinstance(snapshot, str): snapshot = str(snapshot or '')
+    if not isinstance(provider_note, str): provider_note = str(provider_note or '')
+    if not isinstance(preference_note, str): preference_note = str(preference_note or '')
+    try:
+        context_line = _voice_context_line(provider_note=provider_note, preference_note=preference_note)
+        next_step = _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot)
+        if recommended_path == "local_free":
+            if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+                voice_name = "Kokoro" if snapshot["local_tts"].get("provider") == LOCAL_KOKORO_TTS_PROVIDER else "the local system voice"
+                lines = [
+                    f"Nice, local voice is ready: faster-whisper for listening, {voice_name} for replies.",
+                    "",
+                    "Ask me for one short voice reply, then send a quick Telegram voice note.",
+                    "After that, run `/voice self-test` to confirm the proof trail.",
+                ]
+            elif snapshot["local_stt"]["ready"]:
+                lines = [
+                    "Local listening is ready. The speaking voice is the only missing piece.",
+                    "I would finish Kokoro next because it gives Spark a much nicer local voice without sending keys through Telegram.",
+                    context_line,
+                    next_step,
+                ]
+            else:
+                lines = [
+                    "I would start with the local voice path for this Spark.",
+                    "It keeps the first setup private and free, then we can add a hosted voice later if you want more polish.",
+                    context_line,
+                    next_step,
+                ]
+            return "\n".join(line for line in lines if line is not None)
+        if recommended_path == "paid_provider":
+            if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+                lead = "GPT Realtime 2 is configured for hosted voice replies."
+                recommendation = "I would use it for the more expressive voice-agent path, while keeping ElevenLabs as the simpler classic TTS fallback."
+            else:
+                lead = "For paid voice, I would optimize for reliable Telegram delivery first, then tune the voice character."
+                recommendation = (
+                    "My current recommendation is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
+                    "and MiniMax or Z.ai only through explicit adapters once they are verified."
+                )
             lines = [
-                f"Nice, local voice is ready: faster-whisper for listening, {voice_name} for replies.",
+                lead,
+                recommendation,
+                context_line,
                 "",
-                "Ask me for one short voice reply, then send a quick Telegram voice note.",
-                "After that, run `/voice self-test` to confirm the proof trail.",
-            ]
-        elif snapshot["local_stt"]["ready"]:
-            lines = [
-                "Local listening is ready. The speaking voice is the only missing piece.",
-                "I would finish Kokoro next because it gives Spark a much nicer local voice without sending keys through Telegram.",
-                context_line,
                 next_step,
             ]
-        else:
-            lines = [
-                "I would start with the local voice path for this Spark.",
-                "It keeps the first setup private and free, then we can add a hosted voice later if you want more polish.",
-                context_line,
-                next_step,
-            ]
-        return "\n".join(line for line in lines if line is not None)
-    if recommended_path == "paid_provider":
-        if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
-            lead = "GPT Realtime 2 is configured for hosted voice replies."
-            recommendation = "I would use it for the more expressive voice-agent path, while keeping ElevenLabs as the simpler classic TTS fallback."
-        else:
-            lead = "For paid voice, I would optimize for reliable Telegram delivery first, then tune the voice character."
-            recommendation = (
-                "My current recommendation is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
-                "and MiniMax or Z.ai only through explicit adapters once they are verified."
-            )
+            return "\n".join(line for line in lines if line is not None)
         lines = [
-            lead,
-            recommendation,
+            "I can help set up voice in the direction that fits this Spark best.",
+            "Choose local/private for faster-whisper plus Kokoro, or hosted/premium for ElevenLabs after listening is verified.",
             context_line,
             "",
             next_step,
         ]
         return "\n".join(line for line in lines if line is not None)
-    lines = [
-        "I can help set up voice in the direction that fits this Spark best.",
-        "Choose local/private for faster-whisper plus Kokoro, or hosted/premium for ElevenLabs after listening is verified.",
-        context_line,
-        "",
-        next_step,
-    ]
-    return "\n".join(line for line in lines if line is not None)
 
 
+
+    except Exception:
+        return ""
 def _voice_context_line(*, provider_note: dict[str, str], preference_note: dict[str, str]) -> str | None:
-    preference = preference_note.get("preference")
-    if preference == "local":
-        return "This also matches the saved preference signal I can see: local/private tooling when it is good enough."
-    if preference == "paid_quality":
-        return "This matches the saved preference signal I can see: quality-first voice is worth a paid provider."
-    provider = provider_note.get("provider")
-    if provider and provider not in {"unknown", "openai"}:
-        label = provider_note.get("label") or provider
-        return f"I can see this Spark is currently running through {label}; I will not assume that provider has voice until its speech endpoint is verified."
-    return "No API keys belong in Telegram; keep provider secrets in Spark's local config or secret layer."
-
-
-def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if not isinstance(provider_note, str): provider_note = str(provider_note or '')
+    if not isinstance(preference_note, str): preference_note = str(preference_note or '')
     try:
-        return _runtime_env_map(env_file_path=env_file_path or None)
-    except (OSError, ValueError):
-        return _process_voice_env_map()
+        preference = preference_note.get("preference")
+        if preference == "local":
+            return "This also matches the saved preference signal I can see: local/private tooling when it is good enough."
+        if preference == "paid_quality":
+            return "This matches the saved preference signal I can see: quality-first voice is worth a paid provider."
+        provider = provider_note.get("provider")
+        if provider and provider not in {"unknown", "openai"}:
+            label = provider_note.get("label") or provider
+            return f"I can see this Spark is currently running through {label}; I will not assume that provider has voice until its speech endpoint is verified."
+        return "No API keys belong in Telegram; keep provider secrets in Spark's local config or secret layer."
 
 
+
+    except Exception:
+        return ""
+def _safe_builder_env_map(payload: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        try:
+            return _runtime_env_map(env_file_path=env_file_path or None)
+        except (OSError, ValueError):
+            return _process_voice_env_map()
+
+
+
+    except Exception:
+        return {}
 def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> str:
-    installed_line = "Kokoro is already installed for this Spark." if install_status == "already_installed" else "Done, Kokoro is installed for this Spark."
-    if kokoro_ready:
-        ready_line = (
-            "Nice, Kokoro is already installed for this Spark. The local voice files are connected too."
-            if install_status == "already_installed"
-            else "Nice, Kokoro is installed for this Spark. The local voice files are connected too."
-        )
+    if not isinstance(install_status, str): install_status = str(install_status or '')
+    try:
+        installed_line = "Kokoro is already installed for this Spark." if install_status == "already_installed" else "Done, Kokoro is installed for this Spark."
+        if kokoro_ready:
+            ready_line = (
+                "Nice, Kokoro is already installed for this Spark. The local voice files are connected too."
+                if install_status == "already_installed"
+                else "Nice, Kokoro is installed for this Spark. The local voice files are connected too."
+            )
+            return "\n".join(
+                [
+                    ready_line,
+                    "",
+                    "You can test it with `/voice onboard local`.",
+                ]
+            )
         return "\n".join(
             [
-                ready_line,
-                "",
-                "You can test it with `/voice onboard local`.",
+                installed_line,
+                "One local setup step is still needed: connect the Kokoro model file and voices file on this computer.",
+                "Keep that part outside Telegram. Once those paths are saved in Spark's local config, I can use Kokoro for voice replies.",
+                "Then rerun `/voice onboard local`.",
             ]
         )
-    return "\n".join(
-        [
-            installed_line,
-            "One local setup step is still needed: connect the Kokoro model file and voices file on this computer.",
-            "Keep that part outside Telegram. Once those paths are saved in Spark's local config, I can use Kokoro for voice replies.",
-            "Then rerun `/voice onboard local`.",
-        ]
-    )
 
 
+
+    except Exception:
+        return ""
 def _faster_whisper_install_reply_text(*, install_status: str, stt_ready: bool) -> str:
     if stt_ready:
         ready_line = (
