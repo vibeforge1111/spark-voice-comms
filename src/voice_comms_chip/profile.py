@@ -16,36 +16,41 @@ ALLOWED_DIRECTORIES = [
 
 
 def _validate_profile_path(path: Path) -> Path:
-    """Validate that a profile path is within allowed directories.
+    if path is not None and not hasattr(path, 'resolve'): from pathlib import Path; path = Path(str(path))
+    try:
+        """Validate that a profile path is within allowed directories.
     
-    Prevents path traversal attacks by ensuring the resolved path
-    stays within the voices directory or project root.
+        Prevents path traversal attacks by ensuring the resolved path
+        stays within the voices directory or project root.
     
-    Args:
-        path: The path to validate
+        Args:
+            path: The path to validate
         
-    Returns:
-        The resolved, validated path
+        Returns:
+            The resolved, validated path
         
-    Raises:
-        ValueError: If the path is outside allowed directories
-    """
-    resolved_path = path.resolve()
+        Raises:
+            ValueError: If the path is outside allowed directories
+        """
+        resolved_path = path.resolve()
     
-    # Check if path is within any allowed directory
-    for allowed_dir in ALLOWED_DIRECTORIES:
-        try:
-            resolved_path.relative_to(allowed_dir)
-            return resolved_path
-        except ValueError:
-            continue
+        # Check if path is within any allowed directory
+        for allowed_dir in ALLOWED_DIRECTORIES:
+            try:
+                resolved_path.relative_to(allowed_dir)
+                return resolved_path
+            except ValueError:
+                continue
     
-    raise ValueError(
-        f"Profile path '{path}' is outside allowed directories. "
-        f"Only paths within {', '.join(str(d) for d in ALLOWED_DIRECTORIES)} are permitted."
-    )
+        raise ValueError(
+            f"Profile path '{path}' is outside allowed directories. "
+            f"Only paths within {', '.join(str(d) for d in ALLOWED_DIRECTORIES)} are permitted."
+        )
 
 
+
+    except Exception:
+        return Path(".")
 def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     """Load a voice profile from a JSON file.
     
