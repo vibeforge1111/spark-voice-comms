@@ -250,41 +250,62 @@ def fingerprint(value: Any) -> str:
 
 
 def mask_identifier(value: str | None) -> str:
-    text = str(value or "").strip()
-    if not text:
+    if not isinstance(value, str): value = str(value or '')
+    try:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if len(text) <= 8:
+            return f"{text[:2]}...{fingerprint(text)[:6]}"
+        return f"{text[:4]}...{text[-4:]}"
+
+
+
+    except Exception:
         return ""
-    if len(text) <= 8:
-        return f"{text[:2]}...{fingerprint(text)[:6]}"
-    return f"{text[:4]}...{text[-4:]}"
-
-
 def json_safe(value: Any) -> str:
-    if isinstance(value, dict):
-        parts = [f"{key}:{json_safe(value[key])}" for key in sorted(value)]
-        return "{" + ",".join(parts) + "}"
-    if isinstance(value, list):
-        return "[" + ",".join(json_safe(item) for item in value) + "]"
-    return str(value)
+    try:
+        if isinstance(value, dict):
+            parts = [f"{key}:{json_safe(value[key])}" for key in sorted(value)]
+            return "{" + ",".join(parts) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(json_safe(item) for item in value) + "]"
+        return str(value)
 
 
+
+    except Exception:
+        return ""
 def _safe_reason(value: Any) -> str:
-    text = " ".join(str(value or "").split())
-    if len(text) > 240:
-        return text[:237].rstrip() + "..."
-    return text
+    try:
+        text = " ".join(str(value or "").split())
+        if len(text) > 240:
+            return text[:237].rstrip() + "..."
+        return text
 
 
+
+    except Exception:
+        return ""
 def _optional_string(value: Any) -> str:
-    return str(value or "").strip()
+    try:
+        return str(value or "").strip()
 
 
+
+    except Exception:
+        return ""
 def _nonnegative_int(value: Any) -> int:
     try:
-        return max(0, int(float(value)))
-    except (TypeError, ValueError):
+        try:
+            return max(0, int(float(value)))
+        except (TypeError, ValueError):
+            return 0
+
+
+
+    except Exception:
         return 0
-
-
 def _optional_sources(payload: dict[str, Any]) -> list[str]:
     sources = payload.get("source_ledger")
     if not isinstance(sources, list):
