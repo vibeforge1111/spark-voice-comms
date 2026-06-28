@@ -20,69 +20,88 @@ def build_voice_runtime_state(
     generated_at: str | None = None,
     legacy_alias_visible: bool = False,
 ) -> dict[str, Any]:
-    stt_state = _normalize_stt(stt or {})
-    tts_state = _normalize_tts(tts or {})
-    delivery_state = _normalize_telegram_delivery(telegram_delivery or {})
-    latency_state = _normalize_latency(latency or {})
-    claim_levels = _claim_levels(stt=stt_state, tts=tts_state, delivery=delivery_state)
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": generated_at or _now_iso(),
-        "surface": str(surface or "unknown"),
-        "dm_voice_replies": str(dm_voice_replies or "unknown"),
-        "canonical_chip_key": CANONICAL_CHIP_KEY,
-        "legacy_alias_visible": bool(legacy_alias_visible),
-        "stt": stt_state,
-        "tts": tts_state,
-        "telegram_delivery": delivery_state,
-        "latency": latency_state,
-        "claim_levels": claim_levels,
-        "source_ledger": list(source_ledger or []),
-    }
+    if not isinstance(surface, str): surface = str(surface or '')
+    if not isinstance(dm_voice_replies, str): dm_voice_replies = str(dm_voice_replies or '')
+    if not isinstance(stt, str): stt = str(stt or '')
+    if not isinstance(tts, str): tts = str(tts or '')
+    if not isinstance(telegram_delivery, str): telegram_delivery = str(telegram_delivery or '')
+    if not isinstance(latency, str): latency = str(latency or '')
+    if not isinstance(source_ledger, str): source_ledger = str(source_ledger or '')
+    if not isinstance(generated_at, str): generated_at = str(generated_at or '')
+    try:
+        stt_state = _normalize_stt(stt or {})
+        tts_state = _normalize_tts(tts or {})
+        delivery_state = _normalize_telegram_delivery(telegram_delivery or {})
+        latency_state = _normalize_latency(latency or {})
+        claim_levels = _claim_levels(stt=stt_state, tts=tts_state, delivery=delivery_state)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "generated_at": generated_at or _now_iso(),
+            "surface": str(surface or "unknown"),
+            "dm_voice_replies": str(dm_voice_replies or "unknown"),
+            "canonical_chip_key": CANONICAL_CHIP_KEY,
+            "legacy_alias_visible": bool(legacy_alias_visible),
+            "stt": stt_state,
+            "tts": tts_state,
+            "telegram_delivery": delivery_state,
+            "latency": latency_state,
+            "claim_levels": claim_levels,
+            "source_ledger": list(source_ledger or []),
+        }
 
 
+
+    except Exception:
+        return {}
 def state_from_status(
     *,
     status: dict[str, Any],
     profile_summary: dict[str, Any],
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    surface = str(payload.get("surface") or "telegram").strip() or "telegram"
-    local_tts_ready = bool(status.get("local_tts_ready"))
-    local_tts_provider = str(status.get("local_tts_provider") or "").strip()
-    if not local_tts_provider and local_tts_ready:
-        local_tts_provider = "local"
-    tts_ready = bool(status.get("tts_ready", local_tts_ready))
-    tts_provider_id = str(status.get("tts_provider_id") or local_tts_provider or "none").strip() or "none"
-    delivery = payload.get("telegram_delivery") if isinstance(payload.get("telegram_delivery"), dict) else {}
-    latency = payload.get("latency") if isinstance(payload.get("latency"), dict) else {}
-    return build_voice_runtime_state(
-        surface=surface,
-        dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
-        stt={
-            "provider_id": status.get("provider_id") or "none",
-            "provider_kind": status.get("provider_kind") or "unknown",
-            "mode": "local" if status.get("local_ready") else ("hosted" if status.get("ready") else "unknown"),
-            "ready": bool(status.get("ready")),
-            "model": status.get("model"),
-            "claim_boundary": "Transcription readiness is not Telegram delivery proof.",
-        },
-        tts={
-            "provider_id": tts_provider_id,
-            "mode": "local" if tts_provider_id in {"kokoro", "pyttsx3", "local"} else "hosted",
-            "ready": tts_ready,
-            "voice_name": profile_summary.get("profile_name"),
-            "voice_id": status.get("tts_voice_id"),
-            "model_id": status.get("tts_model_id"),
-            "settings": status.get("tts_settings") if isinstance(status.get("tts_settings"), dict) else {},
-        },
-        telegram_delivery=delivery,
-        latency=latency,
-        source_ledger=["voice.status", "voice_profile"] + _optional_sources(payload),
-        legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
-    )
+    if not isinstance(status, str): status = str(status or '')
+    if not isinstance(profile_summary, str): profile_summary = str(profile_summary or '')
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        surface = str(payload.get("surface") or "telegram").strip() or "telegram"
+        local_tts_ready = bool(status.get("local_tts_ready"))
+        local_tts_provider = str(status.get("local_tts_provider") or "").strip()
+        if not local_tts_provider and local_tts_ready:
+            local_tts_provider = "local"
+        tts_ready = bool(status.get("tts_ready", local_tts_ready))
+        tts_provider_id = str(status.get("tts_provider_id") or local_tts_provider or "none").strip() or "none"
+        delivery = payload.get("telegram_delivery") if isinstance(payload.get("telegram_delivery"), dict) else {}
+        latency = payload.get("latency") if isinstance(payload.get("latency"), dict) else {}
+        return build_voice_runtime_state(
+            surface=surface,
+            dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
+            stt={
+                "provider_id": status.get("provider_id") or "none",
+                "provider_kind": status.get("provider_kind") or "unknown",
+                "mode": "local" if status.get("local_ready") else ("hosted" if status.get("ready") else "unknown"),
+                "ready": bool(status.get("ready")),
+                "model": status.get("model"),
+                "claim_boundary": "Transcription readiness is not Telegram delivery proof.",
+            },
+            tts={
+                "provider_id": tts_provider_id,
+                "mode": "local" if tts_provider_id in {"kokoro", "pyttsx3", "local"} else "hosted",
+                "ready": tts_ready,
+                "voice_name": profile_summary.get("profile_name"),
+                "voice_id": status.get("tts_voice_id"),
+                "model_id": status.get("tts_model_id"),
+                "settings": status.get("tts_settings") if isinstance(status.get("tts_settings"), dict) else {},
+            },
+            telegram_delivery=delivery,
+            latency=latency,
+            source_ledger=["voice.status", "voice_profile"] + _optional_sources(payload),
+            legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
+        )
 
 
+
+    except Exception:
+        return {}
 def state_from_speak(
     *,
     request: dict[str, Any],
@@ -91,38 +110,46 @@ def state_from_speak(
     profile_summary: dict[str, Any],
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    surface = str(request.get("surface") or payload.get("surface") or "unknown").strip() or "unknown"
-    delivery = payload.get("telegram_delivery") if isinstance(payload.get("telegram_delivery"), dict) else {}
-    latency = payload.get("latency") if isinstance(payload.get("latency"), dict) else {}
-    return build_voice_runtime_state(
-        surface=surface,
-        dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
-        stt={
-            "provider_id": "not_used",
-            "provider_kind": "none",
-            "mode": "not_applicable",
-            "ready": False,
-            "claim_boundary": "Synthesis readiness is not transcription readiness.",
-        },
-        tts={
-            "provider_id": request.get("provider_id") or "none",
-            "mode": "local" if request.get("provider_id") in {"kokoro", "pyttsx3"} else "hosted",
-            "ready": bool(audio_bytes),
-            "voice_name": request.get("preferred_voice_name") or profile_summary.get("profile_name"),
-            "voice_id": resolved_voice_id,
-            "model_id": request.get("model_id"),
-            "mime_type": request.get("mime_type"),
-            "voice_compatible": bool(request.get("voice_compatible")),
-            "audio_bytes": len(audio_bytes),
-            "settings": request.get("voice_settings") if isinstance(request.get("voice_settings"), dict) else {},
-        },
-        telegram_delivery=delivery,
-        latency=latency,
-        source_ledger=["voice.speak", "voice_profile"] + _optional_sources(payload),
-        legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
-    )
+    if not isinstance(request, str): request = str(request or '')
+    if not isinstance(resolved_voice_id, str): resolved_voice_id = str(resolved_voice_id or '')
+    if not isinstance(profile_summary, str): profile_summary = str(profile_summary or '')
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        surface = str(request.get("surface") or payload.get("surface") or "unknown").strip() or "unknown"
+        delivery = payload.get("telegram_delivery") if isinstance(payload.get("telegram_delivery"), dict) else {}
+        latency = payload.get("latency") if isinstance(payload.get("latency"), dict) else {}
+        return build_voice_runtime_state(
+            surface=surface,
+            dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
+            stt={
+                "provider_id": "not_used",
+                "provider_kind": "none",
+                "mode": "not_applicable",
+                "ready": False,
+                "claim_boundary": "Synthesis readiness is not transcription readiness.",
+            },
+            tts={
+                "provider_id": request.get("provider_id") or "none",
+                "mode": "local" if request.get("provider_id") in {"kokoro", "pyttsx3"} else "hosted",
+                "ready": bool(audio_bytes),
+                "voice_name": request.get("preferred_voice_name") or profile_summary.get("profile_name"),
+                "voice_id": resolved_voice_id,
+                "model_id": request.get("model_id"),
+                "mime_type": request.get("mime_type"),
+                "voice_compatible": bool(request.get("voice_compatible")),
+                "audio_bytes": len(audio_bytes),
+                "settings": request.get("voice_settings") if isinstance(request.get("voice_settings"), dict) else {},
+            },
+            telegram_delivery=delivery,
+            latency=latency,
+            source_ledger=["voice.speak", "voice_profile"] + _optional_sources(payload),
+            legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
+        )
 
 
+
+    except Exception:
+        return {}
 def state_from_transcribe(
     *,
     provider_id: str,
@@ -134,51 +161,66 @@ def state_from_transcribe(
     transcribe_ms: int = 0,
     fallback_reason: str | None = None,
 ) -> dict[str, Any]:
-    surface = str(payload.get("surface") or "telegram").strip() or "telegram"
-    return build_voice_runtime_state(
-        surface=surface,
-        dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
-        stt={
-            "provider_id": provider_id,
-            "provider_kind": "local" if provider_id in {"local_faster_whisper", "deterministic_fallback"} else "hosted",
-            "mode": mode,
-            "ready": True,
-            "model": model,
-            "claim_boundary": "Transcription succeeded; TTS and Telegram delivery are separate claims.",
-            "last_failure_reason": fallback_reason or "",
-        },
-        tts={
-            "provider_id": "not_used",
-            "mode": "not_applicable",
-            "ready": False,
-        },
-        telegram_delivery={},
-        latency={"transcribe_ms": transcribe_ms},
-        source_ledger=["voice.transcribe"] + _optional_sources(payload),
-        legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
-    ) | {
-        "transcript": {
-            "characters": len(transcript_text),
-            "fingerprint": fingerprint(transcript_text),
-            "audio_bytes": max(0, int(audio_bytes)),
-            "fallback_reason": _safe_reason(fallback_reason),
+    if not isinstance(provider_id, str): provider_id = str(provider_id or '')
+    if not isinstance(mode, str): mode = str(mode or '')
+    if not isinstance(model, str): model = str(model or '')
+    if not isinstance(transcript_text, str): transcript_text = str(transcript_text or '')
+    if not isinstance(payload, str): payload = str(payload or '')
+    if not isinstance(fallback_reason, str): fallback_reason = str(fallback_reason or '')
+    try:
+        surface = str(payload.get("surface") or "telegram").strip() or "telegram"
+        return build_voice_runtime_state(
+            surface=surface,
+            dm_voice_replies=str(payload.get("dm_voice_replies") or "unknown"),
+            stt={
+                "provider_id": provider_id,
+                "provider_kind": "local" if provider_id in {"local_faster_whisper", "deterministic_fallback"} else "hosted",
+                "mode": mode,
+                "ready": True,
+                "model": model,
+                "claim_boundary": "Transcription succeeded; TTS and Telegram delivery are separate claims.",
+                "last_failure_reason": fallback_reason or "",
+            },
+            tts={
+                "provider_id": "not_used",
+                "mode": "not_applicable",
+                "ready": False,
+            },
+            telegram_delivery={},
+            latency={"transcribe_ms": transcribe_ms},
+            source_ledger=["voice.transcribe"] + _optional_sources(payload),
+            legacy_alias_visible=bool(payload.get("legacy_alias_visible")),
+        ) | {
+            "transcript": {
+                "characters": len(transcript_text),
+                "fingerprint": fingerprint(transcript_text),
+                "audio_bytes": max(0, int(audio_bytes)),
+                "fallback_reason": _safe_reason(fallback_reason),
+            }
         }
-    }
 
 
+
+    except Exception:
+        return {}
 def _normalize_stt(stt: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "provider_id": str(stt.get("provider_id") or "none"),
-        "provider_kind": str(stt.get("provider_kind") or "unknown"),
-        "mode": str(stt.get("mode") or "unknown"),
-        "ready": bool(stt.get("ready")),
-        "model": _optional_string(stt.get("model")),
-        "last_probe_ref": _optional_string(stt.get("last_probe_ref")),
-        "last_failure_reason": _safe_reason(stt.get("last_failure_reason")),
-        "claim_boundary": str(stt.get("claim_boundary") or "Readiness is scoped to this state section."),
-    }
+    if not isinstance(stt, str): stt = str(stt or '')
+    try:
+        return {
+            "provider_id": str(stt.get("provider_id") or "none"),
+            "provider_kind": str(stt.get("provider_kind") or "unknown"),
+            "mode": str(stt.get("mode") or "unknown"),
+            "ready": bool(stt.get("ready")),
+            "model": _optional_string(stt.get("model")),
+            "last_probe_ref": _optional_string(stt.get("last_probe_ref")),
+            "last_failure_reason": _safe_reason(stt.get("last_failure_reason")),
+            "claim_boundary": str(stt.get("claim_boundary") or "Readiness is scoped to this state section."),
+        }
 
 
+
+    except Exception:
+        return {}
 def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
     voice_id = _optional_string(tts.get("voice_id"))
     settings = tts.get("settings") if isinstance(tts.get("settings"), dict) else {}
