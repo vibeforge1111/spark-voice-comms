@@ -1640,7 +1640,7 @@ def _validate_tts_path(path_str: str, label: str) -> str:
 
     This prevents loading arbitrary files (e.g. ``../../etc/passwd``) through
     the Kokoro TTS ``model_path`` / ``voices_path`` configuration knobs.
-    Only simple, single-segment file paths are accepted.
+    Only simple file paths are accepted (absolute or relative without ..).
     """
     raw = path_str.strip()
     if not raw:
@@ -1648,8 +1648,6 @@ def _validate_tts_path(path_str: str, label: str) -> str:
     normalised = raw.replace("\\", "/")
     if ".." in normalised:
         raise ValueError(f"Invalid {label}: path traversal via '..' is not allowed")
-    if "/" in normalised:
-        raise ValueError(f"Invalid {label}: path separators are not allowed")
     return raw
 
 
