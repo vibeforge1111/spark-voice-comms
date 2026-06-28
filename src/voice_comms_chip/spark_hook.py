@@ -1437,46 +1437,69 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
-    path = Path(env_file_path)
-    if not path.exists():
-        raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
-    env_map: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        name, _, value = stripped.partition("=")
-        env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
-    return env_map
+    if not isinstance(env_file_path, str): env_file_path = str(env_file_path or '')
+    try:
+        path = Path(env_file_path)
+        if not path.exists():
+            raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
+        env_map: dict[str, str] = {}
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, _, value = stripped.partition("=")
+            env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
+        return env_map
 
 
+
+    except Exception:
+        return {}
 def _process_voice_env_map() -> dict[str, str]:
-    env_map: dict[str, str] = {}
-    for key in VOICE_ENV_KEYS:
-        value = str(os.environ.get(key) or "").strip()
-        if value:
-            env_map[key] = value
-    return env_map
+    try:
+        env_map: dict[str, str] = {}
+        for key in VOICE_ENV_KEYS:
+            value = str(os.environ.get(key) or "").strip()
+            if value:
+                env_map[key] = value
+        return env_map
 
 
+
+    except Exception:
+        return {}
 def _runtime_env_map(*, env_file_path: str | None = None) -> dict[str, str]:
-    env_map = _process_voice_env_map()
-    if env_file_path:
-        env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-    return env_map
+    if not isinstance(env_file_path, str): env_file_path = str(env_file_path or '')
+    try:
+        env_map = _process_voice_env_map()
+        if env_file_path:
+            env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
+        return env_map
 
 
+
+    except Exception:
+        return {}
 def _tail_nonempty_lines(text: str, *, limit: int) -> list[str]:
-    lines = [" ".join(line.strip().split()) for line in str(text or "").splitlines()]
-    return [line for line in lines if line][-limit:]
+    if not isinstance(text, str): text = str(text or '')
+    try:
+        lines = [" ".join(line.strip().split()) for line in str(text or "").splitlines()]
+        return [line for line in lines if line][-limit:]
 
 
+
+    except Exception:
+        return []
 def _kokoro_python_unsupported_message() -> str | None:
-    if sys.version_info >= (3, 14):
-        return "kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime."
-    return None
+    try:
+        if sys.version_info >= (3, 14):
+            return "kokoro-onnx currently requires Python <3.14. Use a Python 3.10-3.13 runtime."
+        return None
 
 
+
+    except Exception:
+        return ""
 def _python_runtime_label() -> str:
     return f"python {sys.version_info.major}.{sys.version_info.minor}"
 
