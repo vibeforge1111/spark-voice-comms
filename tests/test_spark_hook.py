@@ -1336,8 +1336,8 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
                 "text": "Kokoro local voice.",
                 "tts": {
                     "provider_id": "kokoro",
-                    "model_path": "kokoro-v1.0.onnx",
-                    "voices_path": "voices-v1.0.bin",
+                    "model_path": str(model_path),
+                    "voices_path": str(voices_path),
                     "voice": "af_sarah",
                     "speed": 1.1,
                     "lang": "en-us",
