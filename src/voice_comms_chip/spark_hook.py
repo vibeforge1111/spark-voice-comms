@@ -1635,6 +1635,22 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     }
 
 
+def _validate_tts_path(path_str: str, label: str) -> str:
+    """Reject user-supplied paths that contain traversal components.
+
+    This prevents loading arbitrary files (e.g. ``../../etc/passwd``) through
+    the Kokoro TTS ``model_path`` / ``voices_path`` configuration knobs.
+    Only simple file paths are accepted (absolute or relative without ..).
+    """
+    raw = path_str.strip()
+    if not raw:
+        raise ValueError(f"{label} must not be empty")
+    normalised = raw.replace("\\", "/")
+    if ".." in normalised:
+        raise ValueError(f"Invalid {label}: path traversal via '..' is not allowed")
+    return raw
+
+
 def _resolve_kokoro_tts_request(
     *,
     tts: dict[str, Any],
@@ -1642,8 +1658,14 @@ def _resolve_kokoro_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
-    voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+    model_path = _validate_tts_path(
+        str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or ""),
+        "model_path",
+    )
+    voices_path = _validate_tts_path(
+        str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or ""),
+        "voices_path",
+    )
     if not model_path or not voices_path:
         raise ValueError(
             f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
@@ -1869,8 +1891,12 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
         soundfile = importlib.import_module("soundfile")
     except ImportError as exc:
         raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
-    raw_model_path = str(request.get("model_path") or "").strip()
-    raw_voices_path = str(request.get("voices_path") or "").strip()
+    raw_model_path = _validate_tts_path(
+        str(request.get("model_path") or ""), "model_path"
+    )
+    raw_voices_path = _validate_tts_path(
+        str(request.get("voices_path") or ""), "voices_path"
+    )
     if not raw_model_path:
         raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
     if not raw_voices_path:

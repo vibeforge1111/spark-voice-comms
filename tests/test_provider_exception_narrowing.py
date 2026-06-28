@@ -166,7 +166,7 @@ def test_synthesize_with_kokoro_rejects_empty_paths_before_model_construction() 
             "soundfile": SimpleNamespace(write=lambda *args, **kwargs: None),
         },
     ):
-        with pytest.raises(RuntimeError, match="model_path is empty"):
+        with pytest.raises(ValueError, match="must not be empty"):
             _synthesize_with_kokoro(request={"text": "hello", "model_path": "", "voices_path": "voices.bin"})
-        with pytest.raises(RuntimeError, match="voices_path is empty"):
+        with pytest.raises(ValueError, match="must not be empty"):
             _synthesize_with_kokoro(request={"text": "hello", "model_path": "model.onnx", "voices_path": ""})
