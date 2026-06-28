@@ -1478,45 +1478,60 @@ def _kokoro_python_unsupported_message() -> str | None:
 
 
 def _python_runtime_label() -> str:
-    return f"python {sys.version_info.major}.{sys.version_info.minor}"
+    try:
+        return f"python {sys.version_info.major}.{sys.version_info.minor}"
 
 
+
+    except Exception:
+        return ""
 def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
-    mode = str(payload.get("fallback_mode") or "").strip().lower()
-    if not mode:
-        return None
-    if mode not in SUPPORTED_FALLBACK_MODES:
-        raise ValueError(
-            f"Unsupported fallback_mode '{mode}'. Supported fallback modes: {', '.join(sorted(SUPPORTED_FALLBACK_MODES))}."
-        )
-    return mode
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        mode = str(payload.get("fallback_mode") or "").strip().lower()
+        if not mode:
+            return None
+        if mode not in SUPPORTED_FALLBACK_MODES:
+            raise ValueError(
+                f"Unsupported fallback_mode '{mode}'. Supported fallback modes: {', '.join(sorted(SUPPORTED_FALLBACK_MODES))}."
+            )
+        return mode
 
 
+
+    except Exception:
+        return ""
 def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, reason: str) -> dict[str, Any]:
-    transcript_text = _build_deterministic_fallback_transcript(
-        audio_bytes=audio_bytes,
-        filename=filename,
-        reason=reason,
-    )
-    return {
-        "returncode": 0,
-        "stdout": transcript_text,
-        "stderr": "",
-        "metrics": {
-            "transcript_characters": len(transcript_text),
-            "audio_bytes": len(audio_bytes),
-            "fallback_used": 1,
-        },
-        "result": {
-            "transcript_text": transcript_text,
-            "provider_id": "deterministic_fallback",
-            "model": "deterministic_fallback",
-            "mode": "deterministic_fallback",
-            "fallback_reason": reason,
-        },
-    }
+    if not isinstance(filename, str): filename = str(filename or '')
+    if not isinstance(reason, str): reason = str(reason or '')
+    try:
+        transcript_text = _build_deterministic_fallback_transcript(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            reason=reason,
+        )
+        return {
+            "returncode": 0,
+            "stdout": transcript_text,
+            "stderr": "",
+            "metrics": {
+                "transcript_characters": len(transcript_text),
+                "audio_bytes": len(audio_bytes),
+                "fallback_used": 1,
+            },
+            "result": {
+                "transcript_text": transcript_text,
+                "provider_id": "deterministic_fallback",
+                "model": "deterministic_fallback",
+                "mode": "deterministic_fallback",
+                "fallback_reason": reason,
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def _with_transcribe_runtime_state(
     response: dict[str, Any],
     *,
@@ -1524,42 +1539,53 @@ def _with_transcribe_runtime_state(
     audio_bytes: int,
     started_at: float,
 ) -> dict[str, Any]:
-    result = response.get("result") if isinstance(response.get("result"), dict) else {}
-    transcribe_ms = _elapsed_ms(started_at)
-    metrics = response.get("metrics") if isinstance(response.get("metrics"), dict) else {}
-    metrics["transcribe_ms"] = transcribe_ms
-    response["metrics"] = metrics
-    result["runtime_state"] = state_from_transcribe(
-        provider_id=str(result.get("provider_id") or "unknown"),
-        mode=str(result.get("mode") or "unknown"),
-        model=str(result.get("model") or ""),
-        audio_bytes=audio_bytes,
-        transcript_text=str(result.get("transcript_text") or ""),
-        payload=payload,
-        transcribe_ms=transcribe_ms,
-        fallback_reason=str(result.get("fallback_reason") or ""),
-    )
-    response["result"] = result
-    return response
-
-
-def _transcription_provider_mode(payload: dict[str, Any]) -> str:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+    if not isinstance(response, str): response = str(response or '')
+    if not isinstance(payload, str): payload = str(payload or '')
     try:
-        env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    except (OSError, ValueError):
-        env_map = _process_voice_env_map()
-    provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
-    if not provider_id:
-        return "auto"
-    normalized = provider_id.replace("_", "-")
-    if normalized in {"auto", "default"}:
-        return "auto"
-    if normalized in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
-        return "local"
-    return "provider"
+        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+        transcribe_ms = _elapsed_ms(started_at)
+        metrics = response.get("metrics") if isinstance(response.get("metrics"), dict) else {}
+        metrics["transcribe_ms"] = transcribe_ms
+        response["metrics"] = metrics
+        result["runtime_state"] = state_from_transcribe(
+            provider_id=str(result.get("provider_id") or "unknown"),
+            mode=str(result.get("mode") or "unknown"),
+            model=str(result.get("model") or ""),
+            audio_bytes=audio_bytes,
+            transcript_text=str(result.get("transcript_text") or ""),
+            payload=payload,
+            transcribe_ms=transcribe_ms,
+            fallback_reason=str(result.get("fallback_reason") or ""),
+        )
+        response["result"] = result
+        return response
 
 
+
+    except Exception:
+        return {}
+def _transcription_provider_mode(payload: dict[str, Any]) -> str:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        try:
+            env_map = _runtime_env_map(env_file_path=env_file_path or None)
+        except (OSError, ValueError):
+            env_map = _process_voice_env_map()
+        provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
+        if not provider_id:
+            return "auto"
+        normalized = provider_id.replace("_", "-")
+        if normalized in {"auto", "default"}:
+            return "auto"
+        if normalized in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
+            return "local"
+        return "provider"
+
+
+
+    except Exception:
+        return ""
 def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) -> dict[str, Any]:
     text = str(payload.get("text") or "").strip()
     if not text:
