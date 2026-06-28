@@ -2415,104 +2415,124 @@ def _hook_input_limit_bytes(hook: str) -> int:
 
 
 def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
-    raw = path.read_bytes()
-    if len(raw) > _hook_input_limit_bytes(hook):
-        raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
+    if path is not None and not hasattr(path, 'resolve'): from pathlib import Path; path = Path(str(path))
+    if not isinstance(hook, str): hook = str(hook or '')
     try:
-        payload = json.loads(raw.decode("utf-8-sig"))
-    except UnicodeDecodeError as exc:
-        raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
-    if not isinstance(payload, dict):
-        raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
-    return payload
+        raw = path.read_bytes()
+        if len(raw) > _hook_input_limit_bytes(hook):
+            raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
+        return payload
 
 
+
+    except Exception:
+        return {}
 def _hook_error_payload(exc: Exception) -> dict[str, Any]:
-    error_code = ""
-    if isinstance(exc, _PublicHookInputError):
-        detail = str(exc)
-        error_code = exc.error_code
-    elif isinstance(exc, json.JSONDecodeError):
-        detail = "Voice hook input must be valid JSON."
-        error_code = "voice_hook_invalid_json"
-    else:
-        detail = str(exc)
-    payload: dict[str, Any] = {
-        "returncode": 1,
-        "stdout": "",
-        "stderr": detail,
-        "metrics": {},
-        "result": {},
-        "error": detail,
-    }
-    if error_code:
-        payload["error_code"] = error_code
-        payload["error_type"] = exc.__class__.__name__
-        payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
-    return payload
+    try:
+        error_code = ""
+        if isinstance(exc, _PublicHookInputError):
+            detail = str(exc)
+            error_code = exc.error_code
+        elif isinstance(exc, json.JSONDecodeError):
+            detail = "Voice hook input must be valid JSON."
+            error_code = "voice_hook_invalid_json"
+        else:
+            detail = str(exc)
+        payload: dict[str, Any] = {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": detail,
+            "metrics": {},
+            "result": {},
+            "error": detail,
+        }
+        if error_code:
+            payload["error_code"] = error_code
+            payload["error_type"] = exc.__class__.__name__
+            payload["redaction"] = "public error envelope; raw hook input, audio bytes, env values, and local paths are omitted"
+        return payload
 
 
+
+    except Exception:
+        return {}
 def _public_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any]:
-    stt = runtime_state.get("stt") if isinstance(runtime_state.get("stt"), dict) else {}
-    tts = runtime_state.get("tts") if isinstance(runtime_state.get("tts"), dict) else {}
-    delivery = runtime_state.get("telegram_delivery") if isinstance(runtime_state.get("telegram_delivery"), dict) else {}
-    return {
-        "schema_version": runtime_state.get("schema_version"),
-        "generated_at": runtime_state.get("generated_at"),
-        "surface": runtime_state.get("surface"),
-        "dm_voice_replies": runtime_state.get("dm_voice_replies"),
-        "canonical_chip_key": runtime_state.get("canonical_chip_key"),
-        "legacy_alias_visible": bool(runtime_state.get("legacy_alias_visible")),
-        "stt": {
-            "provider_id": stt.get("provider_id"),
-            "provider_kind": stt.get("provider_kind"),
-            "mode": stt.get("mode"),
-            "ready": bool(stt.get("ready")),
-            "model": stt.get("model"),
-            "last_probe_ref": stt.get("last_probe_ref"),
-            "last_failure_reason_present": bool(stt.get("last_failure_reason")),
-            "claim_boundary": stt.get("claim_boundary"),
-        },
-        "tts": {
-            "provider_id": tts.get("provider_id"),
-            "mode": tts.get("mode"),
-            "ready": bool(tts.get("ready")),
-            "voice_name": tts.get("voice_name"),
-            "voice_id_masked": tts.get("voice_id_masked"),
-            "voice_id_fingerprint": tts.get("voice_id_fingerprint"),
-            "model_id": tts.get("model_id"),
-            "mime_type": tts.get("mime_type"),
-            "voice_compatible": bool(tts.get("voice_compatible")),
-            "audio_bytes": int(tts.get("audio_bytes") or 0),
-            "settings_fingerprint": tts.get("settings_fingerprint"),
-            "last_probe_ref": tts.get("last_probe_ref"),
-            "claim_boundary": tts.get("claim_boundary"),
-        },
-        "telegram_delivery": {
-            "ready": bool(delivery.get("ready")),
-            "last_send_voice_at_present": bool(delivery.get("last_send_voice_at")),
-            "last_send_voice_status": delivery.get("last_send_voice_status"),
-            "last_failure_reason_present": bool(delivery.get("last_failure_reason")),
-            "telegram_message_id_present": bool(delivery.get("telegram_message_id_present")),
-        },
-        "latency": runtime_state.get("latency") if isinstance(runtime_state.get("latency"), dict) else {},
-        "claim_levels": runtime_state.get("claim_levels") if isinstance(runtime_state.get("claim_levels"), dict) else {},
-        "source_ledger": runtime_state.get("source_ledger") if isinstance(runtime_state.get("source_ledger"), list) else [],
-        "redaction": "metadata only; raw audio, transcript bodies, provider secrets, and unmasked voice ids omitted",
-    }
+    if not isinstance(runtime_state, str): runtime_state = str(runtime_state or '')
+    try:
+        stt = runtime_state.get("stt") if isinstance(runtime_state.get("stt"), dict) else {}
+        tts = runtime_state.get("tts") if isinstance(runtime_state.get("tts"), dict) else {}
+        delivery = runtime_state.get("telegram_delivery") if isinstance(runtime_state.get("telegram_delivery"), dict) else {}
+        return {
+            "schema_version": runtime_state.get("schema_version"),
+            "generated_at": runtime_state.get("generated_at"),
+            "surface": runtime_state.get("surface"),
+            "dm_voice_replies": runtime_state.get("dm_voice_replies"),
+            "canonical_chip_key": runtime_state.get("canonical_chip_key"),
+            "legacy_alias_visible": bool(runtime_state.get("legacy_alias_visible")),
+            "stt": {
+                "provider_id": stt.get("provider_id"),
+                "provider_kind": stt.get("provider_kind"),
+                "mode": stt.get("mode"),
+                "ready": bool(stt.get("ready")),
+                "model": stt.get("model"),
+                "last_probe_ref": stt.get("last_probe_ref"),
+                "last_failure_reason_present": bool(stt.get("last_failure_reason")),
+                "claim_boundary": stt.get("claim_boundary"),
+            },
+            "tts": {
+                "provider_id": tts.get("provider_id"),
+                "mode": tts.get("mode"),
+                "ready": bool(tts.get("ready")),
+                "voice_name": tts.get("voice_name"),
+                "voice_id_masked": tts.get("voice_id_masked"),
+                "voice_id_fingerprint": tts.get("voice_id_fingerprint"),
+                "model_id": tts.get("model_id"),
+                "mime_type": tts.get("mime_type"),
+                "voice_compatible": bool(tts.get("voice_compatible")),
+                "audio_bytes": int(tts.get("audio_bytes") or 0),
+                "settings_fingerprint": tts.get("settings_fingerprint"),
+                "last_probe_ref": tts.get("last_probe_ref"),
+                "claim_boundary": tts.get("claim_boundary"),
+            },
+            "telegram_delivery": {
+                "ready": bool(delivery.get("ready")),
+                "last_send_voice_at_present": bool(delivery.get("last_send_voice_at")),
+                "last_send_voice_status": delivery.get("last_send_voice_status"),
+                "last_failure_reason_present": bool(delivery.get("last_failure_reason")),
+                "telegram_message_id_present": bool(delivery.get("telegram_message_id_present")),
+            },
+            "latency": runtime_state.get("latency") if isinstance(runtime_state.get("latency"), dict) else {},
+            "claim_levels": runtime_state.get("claim_levels") if isinstance(runtime_state.get("claim_levels"), dict) else {},
+            "source_ledger": runtime_state.get("source_ledger") if isinstance(runtime_state.get("source_ledger"), list) else [],
+            "redaction": "metadata only; raw audio, transcript bodies, provider secrets, and unmasked voice ids omitted",
+        }
 
 
+
+    except Exception:
+        return {}
 def _export_runtime_state_if_configured(result: dict[str, Any]) -> None:
-    path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
-    if not path_text:
-        return
-    result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
-    runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
-    if runtime_state is None:
-        return
-    _write_output(Path(path_text).expanduser(), _public_runtime_state(runtime_state))
+    if not isinstance(result, str): result = str(result or '')
+    try:
+        path_text = str(os.environ.get(ENV_RUNTIME_STATE_PATH) or "").strip()
+        if not path_text:
+            return
+        result_payload = result.get("result") if isinstance(result.get("result"), dict) else {}
+        runtime_state = result_payload.get("runtime_state") if isinstance(result_payload.get("runtime_state"), dict) else None
+        if runtime_state is None:
+            return
+        _write_output(Path(path_text).expanduser(), _public_runtime_state(runtime_state))
 
 
+
+    except Exception:
+        return None
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
