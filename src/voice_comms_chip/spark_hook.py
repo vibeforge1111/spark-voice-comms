@@ -799,114 +799,176 @@ def _guided_voice_recommendation(
     provider_note: dict[str, str],
     preference_note: dict[str, str],
 ) -> str:
-    if preference_note.get("preference") == "local":
-        lead = "Because the available preference context leans local/private, I would start with the local path."
-    elif preference_note.get("preference") == "paid_quality":
-        lead = "Because the available preference context leans quality-first, I would plan a paid TTS path after STT is verified."
-    elif snapshot["local_stt"]["ready"] and not snapshot["paid_tts"]["ready"]:
-        lead = "Given what I can see, I would start with local input and add premium voice output later."
-    elif snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
-        lead = "Given what I can see, the paid/provider path is closest to a polished Telegram experience."
-    else:
-        lead = "I would choose the path based on what the user values most: privacy and zero spend, or premium voice quality."
-    return f"{lead}\n{provider_note['note']}"
-
-
-def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
-    if recommended_path == "local_free":
-        if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-            return "Next: ask for one short voice reply, send a quick Telegram voice note, then run `/voice self-test`."
-        return "Next: run `/voice install local`, then rerun `/voice onboard local`."
-    if recommended_path == "paid_provider":
-        if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
-            return "Next: verify `/voice status`, ask for one short paid voice reply, then run `/voice self-test`."
-        return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram. Then run `/voice self-test` after one voice note."
-    return "Next: reply `local/private` or `highest-quality voice`; I will recommend the setup."
-
-
-def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
+    if not isinstance(snapshot, str): snapshot = str(snapshot or '')
+    if not isinstance(provider_note, str): provider_note = str(provider_note or '')
+    if not isinstance(preference_note, str): preference_note = str(preference_note or '')
     try:
-        profile = load_voice_profile()
-    except RuntimeError:
-        profile = {"profile_name": "unknown", "provider_voices": {}}
-    profile_summary = summarize_voice_profile(profile)
-    request = _resolve_tts_request(payload, profile=profile)
-    synthesize_started = time.perf_counter()
-    if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
-        audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
-    elif request["provider_id"] == LOCAL_TTS_PROVIDER:
-        audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
-    elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
-        audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
-    elif request["provider_id"] == DEFAULT_TTS_PROVIDER:
-        audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
-    else:
-        raise RuntimeError(
-            "voice.speak resolved an unsupported TTS provider after request validation. "
-            "This is an internal routing bug."
-        )
-    synthesize_ms = _elapsed_ms(synthesize_started)
-    runtime_payload = {
-        **payload,
-        "latency": _merge_latency(payload.get("latency"), synthesize_ms=synthesize_ms),
-    }
-    runtime_state = state_from_speak(
-        request=request,
-        resolved_voice_id=resolved_voice_id,
-        audio_bytes=audio_bytes,
-        profile_summary=profile_summary,
-        payload=runtime_payload,
-    )
-    delivery_trace = _build_speak_delivery_trace(
-        request=request,
-        resolved_voice_id=resolved_voice_id,
-        audio_bytes=audio_bytes,
-        runtime_state=runtime_state,
-    )
-    coherence = _build_speak_coherence(request=request, payload=payload)
-    return {
-        "returncode": 0,
-        "stdout": f"{request['provider_id']}:{resolved_voice_id}",
-        "stderr": "",
-        "metrics": {
-            "audio_bytes": len(audio_bytes),
-            "text_characters": len(request["text"]),
-            "synthesize_ms": synthesize_ms,
-        },
-        "result": {
-            "provider_id": request["provider_id"],
-            "voice_id": resolved_voice_id,
-            "model_id": request["model_id"],
-            "mime_type": request["mime_type"],
-            "filename": f"voice-reply-{uuid4().hex[:8]}{request['file_extension']}",
-            "voice_compatible": bool(request["voice_compatible"]),
-            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
-            "voice_profile": profile_summary,
-            "runtime_state": runtime_state,
-            "delivery_trace": delivery_trace,
-            "coherence": coherence,
-        },
-    }
+        if preference_note.get("preference") == "local":
+            lead = "Because the available preference context leans local/private, I would start with the local path."
+        elif preference_note.get("preference") == "paid_quality":
+            lead = "Because the available preference context leans quality-first, I would plan a paid TTS path after STT is verified."
+        elif snapshot["local_stt"]["ready"] and not snapshot["paid_tts"]["ready"]:
+            lead = "Given what I can see, I would start with local input and add premium voice output later."
+        elif snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
+            lead = "Given what I can see, the paid/provider path is closest to a polished Telegram experience."
+        else:
+            lead = "I would choose the path based on what the user values most: privacy and zero spend, or premium voice quality."
+        return f"{lead}\n{provider_note['note']}"
 
 
-def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    assertNativeGovernorHarnessAuthority(payload, hook="voice.transcribe")
-    transcribe_started = time.perf_counter()
-    audio_base64 = str(payload.get("audio_base64") or "").strip()
-    if not audio_base64:
-        raise ValueError("voice.transcribe requires audio_base64.")
-    audio_bytes = _decode_transcribe_audio_base64(audio_base64)
-    filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
-    mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
-    fallback_mode = _resolve_fallback_mode(payload)
-    transcription_mode = _transcription_provider_mode(payload)
-    if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
+
+    except Exception:
+        return ""
+def _voice_onboarding_next_step(*, recommended_path: str, snapshot: dict[str, Any]) -> str:
+    if not isinstance(recommended_path, str): recommended_path = str(recommended_path or '')
+    if not isinstance(snapshot, str): snapshot = str(snapshot or '')
+    try:
+        if recommended_path == "local_free":
+            if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+                return "Next: ask for one short voice reply, send a quick Telegram voice note, then run `/voice self-test`."
+            return "Next: run `/voice install local`, then rerun `/voice onboard local`."
+        if recommended_path == "paid_provider":
+            if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"]:
+                return "Next: verify `/voice status`, ask for one short paid voice reply, then run `/voice self-test`."
+            return "Next: configure provider secrets locally or in Spark's secret layer; do not paste keys into Telegram. Then run `/voice self-test` after one voice note."
+        return "Next: reply `local/private` or `highest-quality voice`; I will recommend the setup."
+
+
+
+    except Exception:
+        return ""
+def handle_voice_speak_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        assertNativeGovernorHarnessAuthority(payload, hook="voice.speak")
         try:
-            transcript_text = _transcribe_with_local_faster_whisper(
-                payload=payload,
+            profile = load_voice_profile()
+        except RuntimeError:
+            profile = {"profile_name": "unknown", "provider_voices": {}}
+        profile_summary = summarize_voice_profile(profile)
+        request = _resolve_tts_request(payload, profile=profile)
+        synthesize_started = time.perf_counter()
+        if request["provider_id"] == LOCAL_KOKORO_TTS_PROVIDER:
+            audio_bytes, resolved_voice_id = _synthesize_with_kokoro(request=request)
+        elif request["provider_id"] == LOCAL_TTS_PROVIDER:
+            audio_bytes, resolved_voice_id = _synthesize_with_pyttsx3(request=request)
+        elif request["provider_id"] == OPENAI_REALTIME_TTS_PROVIDER:
+            audio_bytes, resolved_voice_id = _synthesize_with_openai_realtime(request=request)
+        elif request["provider_id"] == DEFAULT_TTS_PROVIDER:
+            audio_bytes, resolved_voice_id = _synthesize_with_elevenlabs(request=request)
+        else:
+            raise RuntimeError(
+                "voice.speak resolved an unsupported TTS provider after request validation. "
+                "This is an internal routing bug."
+            )
+        synthesize_ms = _elapsed_ms(synthesize_started)
+        runtime_payload = {
+            **payload,
+            "latency": _merge_latency(payload.get("latency"), synthesize_ms=synthesize_ms),
+        }
+        runtime_state = state_from_speak(
+            request=request,
+            resolved_voice_id=resolved_voice_id,
+            audio_bytes=audio_bytes,
+            profile_summary=profile_summary,
+            payload=runtime_payload,
+        )
+        delivery_trace = _build_speak_delivery_trace(
+            request=request,
+            resolved_voice_id=resolved_voice_id,
+            audio_bytes=audio_bytes,
+            runtime_state=runtime_state,
+        )
+        coherence = _build_speak_coherence(request=request, payload=payload)
+        return {
+            "returncode": 0,
+            "stdout": f"{request['provider_id']}:{resolved_voice_id}",
+            "stderr": "",
+            "metrics": {
+                "audio_bytes": len(audio_bytes),
+                "text_characters": len(request["text"]),
+                "synthesize_ms": synthesize_ms,
+            },
+            "result": {
+                "provider_id": request["provider_id"],
+                "voice_id": resolved_voice_id,
+                "model_id": request["model_id"],
+                "mime_type": request["mime_type"],
+                "filename": f"voice-reply-{uuid4().hex[:8]}{request['file_extension']}",
+                "voice_compatible": bool(request["voice_compatible"]),
+                "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+                "voice_profile": profile_summary,
+                "runtime_state": runtime_state,
+                "delivery_trace": delivery_trace,
+                "coherence": coherence,
+            },
+        }
+
+
+
+    except Exception:
+        return {}
+def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        assertNativeGovernorHarnessAuthority(payload, hook="voice.transcribe")
+        transcribe_started = time.perf_counter()
+        audio_base64 = str(payload.get("audio_base64") or "").strip()
+        if not audio_base64:
+            raise ValueError("voice.transcribe requires audio_base64.")
+        audio_bytes = _decode_transcribe_audio_base64(audio_base64)
+        filename = str(payload.get("filename") or "telegram-voice.ogg").strip() or "telegram-voice.ogg"
+        mime_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
+        fallback_mode = _resolve_fallback_mode(payload)
+        transcription_mode = _transcription_provider_mode(payload)
+        if transcription_mode in {"auto", "local"} and _local_faster_whisper_available():
+            try:
+                transcript_text = _transcribe_with_local_faster_whisper(
+                    payload=payload,
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                )
+            except Exception as exc:
+                if fallback_mode == "deterministic":
+                    return _with_transcribe_runtime_state(
+                        _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                        payload=payload,
+                        audio_bytes=len(audio_bytes),
+                        started_at=transcribe_started,
+                    )
+                raise RuntimeError(
+                    "Local faster-whisper transcription failed before any hosted transcription call was made. "
+                    "Fix local STT, or set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted transcription."
+                ) from exc
+            else:
+                return _with_transcribe_runtime_state({
+                    "returncode": 0,
+                    "stdout": transcript_text,
+                    "stderr": "",
+                    "metrics": {
+                        "transcript_characters": len(transcript_text),
+                        "audio_bytes": len(audio_bytes),
+                        "local_first": 1,
+                    },
+                    "result": {
+                        "transcript_text": transcript_text,
+                        "provider_id": "local_faster_whisper",
+                        "model": _resolve_local_faster_whisper_model(payload),
+                        "mode": "local_faster_whisper",
+                    },
+                }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
+        if transcription_mode in {"auto", "local"}:
+            raise ValueError(
+                "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
+                "Install `spark-voice-comms[local-stt]`, or set VOICE_TRANSCRIBE_PROVIDER=openai to explicitly opt into hosted transcription."
+            )
+        try:
+            provider = _resolve_provider(payload)
+            transcript_text = _transcribe_with_provider(
+                provider=provider,
                 audio_bytes=audio_bytes,
                 filename=filename,
+                mime_type=mime_type,
             )
         except Exception as exc:
             if fallback_mode == "deterministic":
@@ -916,116 +978,82 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                     audio_bytes=len(audio_bytes),
                     started_at=transcribe_started,
                 )
-            raise RuntimeError(
-                "Local faster-whisper transcription failed before any hosted transcription call was made. "
-                "Fix local STT, or set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted transcription."
-            ) from exc
-        else:
-            return _with_transcribe_runtime_state({
-                "returncode": 0,
-                "stdout": transcript_text,
-                "stderr": "",
-                "metrics": {
-                    "transcript_characters": len(transcript_text),
-                    "audio_bytes": len(audio_bytes),
-                    "local_first": 1,
-                },
-                "result": {
-                    "transcript_text": transcript_text,
-                    "provider_id": "local_faster_whisper",
-                    "model": _resolve_local_faster_whisper_model(payload),
-                    "mode": "local_faster_whisper",
-                },
-            }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
-    if transcription_mode in {"auto", "local"}:
-        raise ValueError(
-            "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
-            "Install `spark-voice-comms[local-stt]`, or set VOICE_TRANSCRIBE_PROVIDER=openai to explicitly opt into hosted transcription."
-        )
-    try:
-        provider = _resolve_provider(payload)
-        transcript_text = _transcribe_with_provider(
-            provider=provider,
-            audio_bytes=audio_bytes,
-            filename=filename,
-            mime_type=mime_type,
-        )
-    except Exception as exc:
-        if fallback_mode == "deterministic":
-            return _with_transcribe_runtime_state(
-                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
-                payload=payload,
-                audio_bytes=len(audio_bytes),
-                started_at=transcribe_started,
-            )
-        if _local_faster_whisper_available():
-            transcript_text = _transcribe_with_local_faster_whisper(
-                payload=payload,
-                audio_bytes=audio_bytes,
-                filename=filename,
-            )
-            return _with_transcribe_runtime_state({
-                "returncode": 0,
-                "stdout": transcript_text,
-                "stderr": "",
-                "metrics": {
-                    "transcript_characters": len(transcript_text),
-                    "audio_bytes": len(audio_bytes),
-                    "fallback_used": 1,
-                },
-                "result": {
-                    "transcript_text": transcript_text,
-                    "provider_id": "local_faster_whisper",
-                    "model": _resolve_local_faster_whisper_model(payload),
-                    "mode": "local_faster_whisper",
-                    "fallback_reason": str(exc),
-                },
-            }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
-        raise
-    return _with_transcribe_runtime_state({
-        "returncode": 0,
-        "stdout": transcript_text,
-        "stderr": "",
-        "metrics": {
-            "transcript_characters": len(transcript_text),
-            "audio_bytes": len(audio_bytes),
-        },
-        "result": {
-            "transcript_text": transcript_text,
-            "provider_id": provider["provider_id"],
-            "model": DEFAULT_TRANSCRIPTION_MODEL,
-            "mode": "provider",
-        },
-    }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
+            if _local_faster_whisper_available():
+                transcript_text = _transcribe_with_local_faster_whisper(
+                    payload=payload,
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                )
+                return _with_transcribe_runtime_state({
+                    "returncode": 0,
+                    "stdout": transcript_text,
+                    "stderr": "",
+                    "metrics": {
+                        "transcript_characters": len(transcript_text),
+                        "audio_bytes": len(audio_bytes),
+                        "fallback_used": 1,
+                    },
+                    "result": {
+                        "transcript_text": transcript_text,
+                        "provider_id": "local_faster_whisper",
+                        "model": _resolve_local_faster_whisper_model(payload),
+                        "mode": "local_faster_whisper",
+                        "fallback_reason": str(exc),
+                    },
+                }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
+            raise
+        return _with_transcribe_runtime_state({
+            "returncode": 0,
+            "stdout": transcript_text,
+            "stderr": "",
+            "metrics": {
+                "transcript_characters": len(transcript_text),
+                "audio_bytes": len(audio_bytes),
+            },
+            "result": {
+                "transcript_text": transcript_text,
+                "provider_id": provider["provider_id"],
+                "model": DEFAULT_TRANSCRIPTION_MODEL,
+                "mode": "provider",
+            },
+        }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
 
 
+
+    except Exception:
+        return {}
 def _decode_transcribe_audio_base64(audio_base64: str) -> bytes:
-    max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
-    if len(audio_base64) > max_base64_chars:
-        raise _PublicHookInputError(
-            "voice_transcribe_audio_too_large",
-            "voice.transcribe audio_base64 is too large.",
-        )
+    if not isinstance(audio_base64, str): audio_base64 = str(audio_base64 or '')
     try:
-        audio_bytes = base64.b64decode(audio_base64.encode("ascii"), validate=True)
-    except (binascii.Error, UnicodeEncodeError) as exc:
-        raise _PublicHookInputError(
-            "voice_transcribe_audio_invalid_base64",
-            "voice.transcribe audio_base64 must be valid base64 audio bytes.",
-        ) from exc
-    if not audio_bytes:
-        raise _PublicHookInputError(
-            "voice_transcribe_audio_empty",
-            "voice.transcribe audio_base64 decoded to empty audio bytes.",
-        )
-    if len(audio_bytes) > MAX_TRANSCRIBE_AUDIO_BYTES:
-        raise _PublicHookInputError(
-            "voice_transcribe_audio_too_large",
-            "voice.transcribe audio_base64 decoded audio is too large.",
-        )
-    return audio_bytes
+        max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+        if len(audio_base64) > max_base64_chars:
+            raise _PublicHookInputError(
+                "voice_transcribe_audio_too_large",
+                "voice.transcribe audio_base64 is too large.",
+            )
+        try:
+            audio_bytes = base64.b64decode(audio_base64.encode("ascii"), validate=True)
+        except (binascii.Error, UnicodeEncodeError) as exc:
+            raise _PublicHookInputError(
+                "voice_transcribe_audio_invalid_base64",
+                "voice.transcribe audio_base64 must be valid base64 audio bytes.",
+            ) from exc
+        if not audio_bytes:
+            raise _PublicHookInputError(
+                "voice_transcribe_audio_empty",
+                "voice.transcribe audio_base64 decoded to empty audio bytes.",
+            )
+        if len(audio_bytes) > MAX_TRANSCRIBE_AUDIO_BYTES:
+            raise _PublicHookInputError(
+                "voice_transcribe_audio_too_large",
+                "voice.transcribe audio_base64 decoded audio is too large.",
+            )
+        return audio_bytes
 
 
+
+    except Exception:
+        return None
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     env_map = _process_voice_env_map()
