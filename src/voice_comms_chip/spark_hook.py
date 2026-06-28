@@ -2077,45 +2077,68 @@ def _build_deterministic_fallback_transcript(
     filename: str,
     reason: str,
 ) -> str:
-    digest = hashlib.sha256(audio_bytes).hexdigest()
-    seed = int(digest[:8], 16)
-    approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
-    snippets = [
-        "Ready when you are.",
-        "Holding for your next command.",
-        "Signal received and queued.",
-        "Spark fallback captured your audio.",
-        "Mic packet decoded locally.",
-    ]
-    snippet = snippets[seed % len(snippets)]
-    cleaned_reason = " ".join(str(reason or "").strip().split())
-    return (
-        f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
-        f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
-        f"Provider reason: {cleaned_reason or 'unknown failure'}."
-    )
+    if not isinstance(filename, str): filename = str(filename or '')
+    if not isinstance(reason, str): reason = str(reason or '')
+    try:
+        digest = hashlib.sha256(audio_bytes).hexdigest()
+        seed = int(digest[:8], 16)
+        approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
+        snippets = [
+            "Ready when you are.",
+            "Holding for your next command.",
+            "Signal received and queued.",
+            "Spark fallback captured your audio.",
+            "Mic packet decoded locally.",
+        ]
+        snippet = snippets[seed % len(snippets)]
+        cleaned_reason = " ".join(str(reason or "").strip().split())
+        return (
+            f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
+            f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
+            f"Provider reason: {cleaned_reason or 'unknown failure'}."
+        )
 
 
+
+    except Exception:
+        return ""
 def _local_faster_whisper_available() -> bool:
-    return importlib.util.find_spec("faster_whisper") is not None
+    try:
+        return importlib.util.find_spec("faster_whisper") is not None
 
 
-def _local_pyttsx3_available() -> bool:
-    return importlib.util.find_spec("pyttsx3") is not None
 
-
-def _local_kokoro_package_available() -> bool:
-    return importlib.util.find_spec("kokoro_onnx") is not None and importlib.util.find_spec("soundfile") is not None
-
-
-def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
-    if not _local_kokoro_package_available():
+    except Exception:
         return False
-    model_path = str(env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
-    voices_path = str(env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
-    return bool(model_path and voices_path and Path(model_path).exists() and Path(voices_path).exists())
+def _local_pyttsx3_available() -> bool:
+    try:
+        return importlib.util.find_spec("pyttsx3") is not None
 
 
+
+    except Exception:
+        return False
+def _local_kokoro_package_available() -> bool:
+    try:
+        return importlib.util.find_spec("kokoro_onnx") is not None and importlib.util.find_spec("soundfile") is not None
+
+
+
+    except Exception:
+        return False
+def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    try:
+        if not _local_kokoro_package_available():
+            return False
+        model_path = str(env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
+        voices_path = str(env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+        return bool(model_path and voices_path and Path(model_path).exists() and Path(voices_path).exists())
+
+
+
+    except Exception:
+        return False
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     if env_file_path:
