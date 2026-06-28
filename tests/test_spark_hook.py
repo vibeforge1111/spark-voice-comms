@@ -359,8 +359,8 @@ def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voic
         "os.environ",
         {
             "VOICE_TTS_PROVIDER": "kokoro",
-            "VOICE_TTS_KOKORO_MODEL_PATH": "kokoro-v1.0.onnx",
-            "VOICE_TTS_KOKORO_VOICES_PATH": "voices-v1.0.bin",
+            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
+            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
         },
         clear=False,
     ), patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
@@ -452,8 +452,8 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     with patch.dict(
         "os.environ",
         {
-            "VOICE_TTS_KOKORO_MODEL_PATH": "kokoro-v1.0.onnx",
-            "VOICE_TTS_KOKORO_VOICES_PATH": "voices-v1.0.bin",
+            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
+            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
         },
         clear=False,
     ), patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
