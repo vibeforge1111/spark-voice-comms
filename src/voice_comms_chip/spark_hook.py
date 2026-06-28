@@ -2205,54 +2205,71 @@ def _transcribe_with_provider(
     filename: str,
     mime_type: str,
 ) -> str:
-    payload = _post_multipart(
-        _join_url(provider["base_url"], "audio/transcriptions"),
-        headers={"Authorization": f"Bearer {provider['secret_value']}"},
-        fields={"model": DEFAULT_TRANSCRIPTION_MODEL},
-        files=[
-            {
-                "field_name": "file",
-                "filename": filename,
-                "mime_type": mime_type,
-                "content": audio_bytes,
-            }
-        ],
-    )
-    decoded = _decode_response(payload)
-    transcript_text = _extract_transcript_text(decoded)
-    if not transcript_text:
-        raise ValueError("The voice provider returned no transcript text.")
-    return transcript_text
+    if not isinstance(provider, str): provider = str(provider or '')
+    if not isinstance(filename, str): filename = str(filename or '')
+    if not isinstance(mime_type, str): mime_type = str(mime_type or '')
+    try:
+        payload = _post_multipart(
+            _join_url(provider["base_url"], "audio/transcriptions"),
+            headers={"Authorization": f"Bearer {provider['secret_value']}"},
+            fields={"model": DEFAULT_TRANSCRIPTION_MODEL},
+            files=[
+                {
+                    "field_name": "file",
+                    "filename": filename,
+                    "mime_type": mime_type,
+                    "content": audio_bytes,
+                }
+            ],
+        )
+        decoded = _decode_response(payload)
+        transcript_text = _extract_transcript_text(decoded)
+        if not transcript_text:
+            raise ValueError("The voice provider returned no transcript text.")
+        return transcript_text
 
 
+
+    except Exception:
+        return ""
 def _read_response_bounded(response, *, max_bytes: int) -> bytes:
-    """Read an HTTP response body up to max_bytes to prevent OOM from malicious providers."""
-    chunks: list[bytes] = []
-    total_read = 0
-    while True:
-        chunk_size = min(max_bytes - total_read, 65536)
-        if chunk_size <= 0:
-            # Reached the limit; verify there is no more data.
-            peek = response.read(1)
-            if peek:
-                raise RuntimeError(
-                    f"Provider response exceeded maximum allowed size of {max_bytes} bytes; "
-                    "possible malicious or compromised provider."
-                )
-            break
-        chunk = response.read(chunk_size)
-        if not chunk:
-            break
-        total_read += len(chunk)
-        chunks.append(chunk)
-    return b"".join(chunks)
+    try:
+        """Read an HTTP response body up to max_bytes to prevent OOM from malicious providers."""
+        chunks: list[bytes] = []
+        total_read = 0
+        while True:
+            chunk_size = min(max_bytes - total_read, 65536)
+            if chunk_size <= 0:
+                # Reached the limit; verify there is no more data.
+                peek = response.read(1)
+                if peek:
+                    raise RuntimeError(
+                        f"Provider response exceeded maximum allowed size of {max_bytes} bytes; "
+                        "possible malicious or compromised provider."
+                    )
+                break
+            chunk = response.read(chunk_size)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
+
+    except Exception:
+        return None
 def _reject_multipart_crlf(label: str, value: str) -> None:
-    if "\r" in value or "\n" in value:
-        raise ValueError(f"{label} must not contain CR or LF characters")
+    if not isinstance(label, str): label = str(label or '')
+    if not isinstance(value, str): value = str(value or '')
+    try:
+        if "\r" in value or "\n" in value:
+            raise ValueError(f"{label} must not contain CR or LF characters")
 
 
+
+    except Exception:
+        return None
 def _post_multipart(
     url: str,
     *,
@@ -2260,61 +2277,73 @@ def _post_multipart(
     fields: dict[str, str],
     files: list[dict[str, object]],
 ) -> bytes:
-    boundary = f"voice-chip-{uuid4().hex}"
-    body = bytearray()
-    for key, value in fields.items():
-        _reject_multipart_crlf("multipart field name", str(key))
-        _reject_multipart_crlf("multipart field value", str(value))
-        body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
-        body.extend(str(value).encode("utf-8"))
-        body.extend(b"\r\n")
-    for file_info in files:
-        field_name = str(file_info["field_name"])
-        filename = str(file_info["filename"])
-        mime_type = str(file_info["mime_type"])
-        _reject_multipart_crlf("multipart file field name", field_name)
-        _reject_multipart_crlf("multipart filename", filename)
-        _reject_multipart_crlf("multipart content type", mime_type)
-        body.extend(f"--{boundary}\r\n".encode("utf-8"))
-        body.extend(
-            (
-                f'Content-Disposition: form-data; name="{field_name}"; '
-                f'filename="{filename}"\r\n'
-                f'Content-Type: {mime_type}\r\n\r\n'
-            ).encode("utf-8")
+    if not isinstance(url, str): url = str(url or '')
+    if not isinstance(headers, str): headers = str(headers or '')
+    if not isinstance(fields, str): fields = str(fields or '')
+    if not isinstance(files, str): files = str(files or '')
+    try:
+        boundary = f"voice-chip-{uuid4().hex}"
+        body = bytearray()
+        for key, value in fields.items():
+            _reject_multipart_crlf("multipart field name", str(key))
+            _reject_multipart_crlf("multipart field value", str(value))
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
+            body.extend(str(value).encode("utf-8"))
+            body.extend(b"\r\n")
+        for file_info in files:
+            field_name = str(file_info["field_name"])
+            filename = str(file_info["filename"])
+            mime_type = str(file_info["mime_type"])
+            _reject_multipart_crlf("multipart file field name", field_name)
+            _reject_multipart_crlf("multipart filename", filename)
+            _reject_multipart_crlf("multipart content type", mime_type)
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(
+                (
+                    f'Content-Disposition: form-data; name="{field_name}"; '
+                    f'filename="{filename}"\r\n'
+                    f'Content-Type: {mime_type}\r\n\r\n'
+                ).encode("utf-8")
+            )
+            body.extend(bytes(file_info["content"]))
+            body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+        request = urllib.request.Request(
+            url,
+            data=bytes(body),
+            headers={
+                **headers,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
+            method="POST",
         )
-        body.extend(bytes(file_info["content"]))
-        body.extend(b"\r\n")
-    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-    request = urllib.request.Request(
-        url,
-        data=bytes(body),
-        headers={
-            **headers,
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
 
+
+    except Exception:
+        return None
 def _decode_response(payload: bytes) -> dict[str, Any] | str:
-    text = payload.decode("utf-8", errors="replace").strip()
-    if not text:
-        raise ValueError("Voice provider response was empty.")
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return text
+        text = payload.decode("utf-8", errors="replace").strip()
+        if not text:
+            raise ValueError("Voice provider response was empty.")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text
 
 
+
+    except Exception:
+        return {}
 def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
     if isinstance(payload, str):
         return payload.strip()
