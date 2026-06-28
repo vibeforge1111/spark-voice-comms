@@ -45,6 +45,8 @@ DEFAULT_OPENAI_REALTIME_MODEL_ID = "gpt-realtime-2"
 DEFAULT_OPENAI_REALTIME_VOICE = "coral"
 DEFAULT_OPENAI_REALTIME_SAMPLE_RATE = 24000
 DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS = 45
+OPENAI_REALTIME_MAX_MESSAGES = 100
+OPENAI_REALTIME_MAX_TOTAL_BYTES = 50 * 1024 * 1024  # 50 MB
 DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
@@ -1969,6 +1971,8 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        message_count = 0
+        total_bytes = 0
         while True:
             raw_message = ws.recv()
             if not raw_message:
@@ -1979,6 +1983,17 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 raise RuntimeError(
                     f"OpenAI Realtime TTS websocket message exceeds size limit "
                     f"({len(raw_message)} > {MAX_WEBSOCKET_MESSAGE_BYTES} bytes)"
+                )
+            message_count += 1
+            if message_count > OPENAI_REALTIME_MAX_MESSAGES:
+                raise RuntimeError(
+                    "OpenAI Realtime TTS exceeded maximum message count limit"
+                )
+            raw_bytes = len(raw_message.encode("utf-8")) if isinstance(raw_message, str) else len(raw_message)
+            total_bytes += raw_bytes
+            if total_bytes > OPENAI_REALTIME_MAX_TOTAL_BYTES:
+                raise RuntimeError(
+                    "OpenAI Realtime TTS exceeded maximum total message size limit"
                 )
             try:
                 event = json.loads(raw_message)
@@ -2088,11 +2103,10 @@ def _build_deterministic_fallback_transcript(
         "Mic packet decoded locally.",
     ]
     snippet = snippets[seed % len(snippets)]
-    cleaned_reason = " ".join(str(reason or "").strip().split())
     return (
         f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
         f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
-        f"Provider reason: {cleaned_reason or 'unknown failure'}."
+        f"Provider reason: transcription unavailable."
     )
 
 
