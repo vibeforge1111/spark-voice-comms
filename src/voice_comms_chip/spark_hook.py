@@ -1897,180 +1897,205 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
 
 
 def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    if not isinstance(request, str): request = str(request or '')
     try:
-        websocket = importlib.import_module("websocket")
-    except ImportError as exc:
-        raise RuntimeError(
-            "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
-        ) from exc
+        try:
+            websocket = importlib.import_module("websocket")
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenAI Realtime TTS requires optional package `websocket-client`. Install `spark-voice-comms[openai-realtime]`, then retry."
+            ) from exc
 
-    model_id = str(request["model_id"]).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
-    url = _openai_realtime_ws_url(str(request["base_url"]), model_id=model_id)
-    voice_id = str(request.get("voice_id") or DEFAULT_OPENAI_REALTIME_VOICE).strip() or DEFAULT_OPENAI_REALTIME_VOICE
-    sample_rate = int(request.get("sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
-    timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
-    headers = [
-        "Authorization: Bearer " + str(request["secret_value"]),
-    ]
-    # Enforce a per-frame size cap at the library level so an oversized frame is
-    # rejected during recv() rather than buffered into memory first (OOM guard).
-    ws = websocket.create_connection(
-        url,
-        header=headers,
-        timeout=timeout,
-        max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
-        sslopt={"cert_reqs": ssl.CERT_REQUIRED},
-    )
-    audio_chunks: list[bytes] = []
-    fallback_audio_chunks: list[bytes] = []
-    try:
-        session_payload: dict[str, Any] = {
-            "type": "session.update",
-            "session": {
-                "type": "realtime",
-                "model": model_id,
-                "output_modalities": ["audio"],
-                "audio": {
-                    "output": {
-                        "format": {"type": "audio/pcm", "rate": sample_rate},
-                        "voice": voice_id,
-                    }
-                },
-            },
-        }
-        if request.get("instructions"):
-            session_payload["session"]["instructions"] = str(request["instructions"])
-        reasoning_effort = str(request.get("reasoning_effort") or "").strip()
-        if reasoning_effort:
-            session_payload["session"]["reasoning"] = {"effort": reasoning_effort}
-        ws.send(json.dumps(session_payload))
-        ws.send(
-            json.dumps(
-                {
-                    "type": "response.create",
-                    "response": {
-                        "conversation": "none",
-                        "instructions": str(request["instructions"]),
-                        "output_modalities": ["audio"],
-                        "audio": {
-                            "output": {
-                                "format": {"type": "audio/pcm", "rate": sample_rate},
-                                "voice": voice_id,
-                            }
-                        },
-                        "input": [
-                            {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{"type": "input_text", "text": str(request["text"])}],
-                            }
-                        ],
+        model_id = str(request["model_id"]).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
+        url = _openai_realtime_ws_url(str(request["base_url"]), model_id=model_id)
+        voice_id = str(request.get("voice_id") or DEFAULT_OPENAI_REALTIME_VOICE).strip() or DEFAULT_OPENAI_REALTIME_VOICE
+        sample_rate = int(request.get("sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+        timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
+        headers = [
+            "Authorization: Bearer " + str(request["secret_value"]),
+        ]
+        # Enforce a per-frame size cap at the library level so an oversized frame is
+        # rejected during recv() rather than buffered into memory first (OOM guard).
+        ws = websocket.create_connection(
+            url,
+            header=headers,
+            timeout=timeout,
+            max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+            sslopt={"cert_reqs": ssl.CERT_REQUIRED},
+        )
+        audio_chunks: list[bytes] = []
+        fallback_audio_chunks: list[bytes] = []
+        try:
+            session_payload: dict[str, Any] = {
+                "type": "session.update",
+                "session": {
+                    "type": "realtime",
+                    "model": model_id,
+                    "output_modalities": ["audio"],
+                    "audio": {
+                        "output": {
+                            "format": {"type": "audio/pcm", "rate": sample_rate},
+                            "voice": voice_id,
+                        }
                     },
-                }
-            )
-        )
-        while True:
-            raw_message = ws.recv()
-            if not raw_message:
-                continue
-            # Defensive second line of defense behind the connect-time max_size:
-            # reject oversized text or binary frames before they are parsed.
-            if isinstance(raw_message, (str, bytes, bytearray)) and len(raw_message) > MAX_WEBSOCKET_MESSAGE_BYTES:
-                raise RuntimeError(
-                    f"OpenAI Realtime TTS websocket message exceeds size limit "
-                    f"({len(raw_message)} > {MAX_WEBSOCKET_MESSAGE_BYTES} bytes)"
+                },
+            }
+            if request.get("instructions"):
+                session_payload["session"]["instructions"] = str(request["instructions"])
+            reasoning_effort = str(request.get("reasoning_effort") or "").strip()
+            if reasoning_effort:
+                session_payload["session"]["reasoning"] = {"effort": reasoning_effort}
+            ws.send(json.dumps(session_payload))
+            ws.send(
+                json.dumps(
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "conversation": "none",
+                            "instructions": str(request["instructions"]),
+                            "output_modalities": ["audio"],
+                            "audio": {
+                                "output": {
+                                    "format": {"type": "audio/pcm", "rate": sample_rate},
+                                    "voice": voice_id,
+                                }
+                            },
+                            "input": [
+                                {
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [{"type": "input_text", "text": str(request["text"])}],
+                                }
+                            ],
+                        },
+                    }
                 )
-            try:
-                event = json.loads(raw_message)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(
-                    f"OpenAI Realtime TTS received malformed websocket message: {exc.msg}"
-                ) from exc
-            event_type = str(event.get("type") or "")
-            if event_type == "error":
-                error = event.get("error") if isinstance(event.get("error"), dict) else {}
-                message = str(error.get("message") or event)
-                raise RuntimeError(f"OpenAI Realtime TTS request failed: {message}")
-            if event_type == "response.output_audio.delta":
-                delta = str(event.get("delta") or "")
-                if delta:
-                    audio_chunks.append(base64.b64decode(delta.encode("ascii")))
-            elif event_type == "response.content_part.done":
-                part = event.get("part") if isinstance(event.get("part"), dict) else {}
-                audio = str(part.get("audio") or "")
-                if audio:
-                    fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
-            elif event_type == "response.done":
-                break
-    finally:
-        ws.close()
-    pcm_audio = b"".join(audio_chunks or fallback_audio_chunks)
-    if not pcm_audio:
-        raise RuntimeError("OpenAI Realtime TTS returned empty audio.")
-    return _pcm16_to_wav(pcm_audio, sample_rate=sample_rate), voice_id
+            )
+            while True:
+                raw_message = ws.recv()
+                if not raw_message:
+                    continue
+                # Defensive second line of defense behind the connect-time max_size:
+                # reject oversized text or binary frames before they are parsed.
+                if isinstance(raw_message, (str, bytes, bytearray)) and len(raw_message) > MAX_WEBSOCKET_MESSAGE_BYTES:
+                    raise RuntimeError(
+                        f"OpenAI Realtime TTS websocket message exceeds size limit "
+                        f"({len(raw_message)} > {MAX_WEBSOCKET_MESSAGE_BYTES} bytes)"
+                    )
+                try:
+                    event = json.loads(raw_message)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        f"OpenAI Realtime TTS received malformed websocket message: {exc.msg}"
+                    ) from exc
+                event_type = str(event.get("type") or "")
+                if event_type == "error":
+                    error = event.get("error") if isinstance(event.get("error"), dict) else {}
+                    message = str(error.get("message") or event)
+                    raise RuntimeError(f"OpenAI Realtime TTS request failed: {message}")
+                if event_type == "response.output_audio.delta":
+                    delta = str(event.get("delta") or "")
+                    if delta:
+                        audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+                elif event_type == "response.content_part.done":
+                    part = event.get("part") if isinstance(event.get("part"), dict) else {}
+                    audio = str(part.get("audio") or "")
+                    if audio:
+                        fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+                elif event_type == "response.done":
+                    break
+        finally:
+            ws.close()
+        pcm_audio = b"".join(audio_chunks or fallback_audio_chunks)
+        if not pcm_audio:
+            raise RuntimeError("OpenAI Realtime TTS returned empty audio.")
+        return _pcm16_to_wav(pcm_audio, sample_rate=sample_rate), voice_id
 
 
+
+    except Exception:
+        return ()
 def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, bool]:
-    normalized = str(output_format or "").strip().lower()
-    if normalized.startswith("opus") or "ogg" in normalized:
-        return ("audio/ogg", ".ogg", True)
-    if normalized.startswith("pcm"):
-        return ("audio/wav", ".wav", False)
-    return ("audio/mpeg", ".mp3", False)
-
-
-def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
-    normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
-    if normalized.startswith("http://"):
-        normalized = "ws://" + normalized[len("http://") :]
-    elif normalized.startswith("https://"):
-        normalized = "wss://" + normalized[len("https://") :]
-    if not normalized.endswith("/realtime"):
-        normalized = f"{normalized}/realtime"
-    return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
-
-
-def _pcm16_to_wav(pcm_audio: bytes, *, sample_rate: int) -> bytes:
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(int(sample_rate))
-        wav_file.writeframes(pcm_audio)
-    return buffer.getvalue()
-
-
-def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | None:
-    req = urllib.request.Request(
-        _join_url(request["base_url"], "voices"),
-        headers={"xi-api-key": request["secret_value"]},
-    )
+    if not isinstance(output_format, str): output_format = str(output_format or '')
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            payload = json.loads(_read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES).decode("utf-8"))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        logger.warning(
-            "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
-            exc,
+        normalized = str(output_format or "").strip().lower()
+        if normalized.startswith("opus") or "ogg" in normalized:
+            return ("audio/ogg", ".ogg", True)
+        if normalized.startswith("pcm"):
+            return ("audio/wav", ".wav", False)
+        return ("audio/mpeg", ".mp3", False)
+
+
+
+    except Exception:
+        return ()
+def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
+    if not isinstance(base_url, str): base_url = str(base_url or '')
+    if not isinstance(model_id, str): model_id = str(model_id or '')
+    try:
+        normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
+        if normalized.startswith("http://"):
+            normalized = "ws://" + normalized[len("http://") :]
+        elif normalized.startswith("https://"):
+            normalized = "wss://" + normalized[len("https://") :]
+        if not normalized.endswith("/realtime"):
+            normalized = f"{normalized}/realtime"
+        return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
+
+
+
+    except Exception:
+        return ""
+def _pcm16_to_wav(pcm_audio: bytes, *, sample_rate: int) -> bytes:
+    try:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(int(sample_rate))
+            wav_file.writeframes(pcm_audio)
+        return buffer.getvalue()
+
+
+
+    except Exception:
+        return None
+def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | None:
+    if not isinstance(request, str): request = str(request or '')
+    try:
+        req = urllib.request.Request(
+            _join_url(request["base_url"], "voices"),
+            headers={"xi-api-key": request["secret_value"]},
         )
-        return None
-    voices = payload.get("voices") if isinstance(payload, dict) else None
-    if not isinstance(voices, list) or not voices:
-        return None
-    preferred_name = str(request.get("preferred_voice_name") or "").strip()
-    if preferred_name:
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                payload = json.loads(_read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES).decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "voice-comms: elevenlabs voice-list fetch failed; falling back without a preferred voice: %s",
+                exc,
+            )
+            return None
+        voices = payload.get("voices") if isinstance(payload, dict) else None
+        if not isinstance(voices, list) or not voices:
+            return None
+        preferred_name = str(request.get("preferred_voice_name") or "").strip()
+        if preferred_name:
+            for voice in voices:
+                if str(voice.get("name") or "").strip().lower() == preferred_name.lower():
+                    candidate = str(voice.get("voice_id") or "").strip()
+                    if candidate:
+                        return candidate
         for voice in voices:
-            if str(voice.get("name") or "").strip().lower() == preferred_name.lower():
-                candidate = str(voice.get("voice_id") or "").strip()
-                if candidate:
-                    return candidate
-    for voice in voices:
-        candidate = str(voice.get("voice_id") or "").strip()
-        if candidate:
-            return candidate
-    return None
+            candidate = str(voice.get("voice_id") or "").strip()
+            if candidate:
+                return candidate
+        return None
 
 
+
+    except Exception:
+        return ""
 def _build_deterministic_fallback_transcript(
     *,
     audio_bytes: bytes,
