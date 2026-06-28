@@ -1255,74 +1255,100 @@ def _build_speak_delivery_trace(
     audio_bytes: bytes,
     runtime_state: dict[str, Any],
 ) -> dict[str, Any]:
-    delivery = runtime_state["telegram_delivery"]
-    status = str(delivery.get("last_send_voice_status") or "unknown")
-    failure_stage = "" if status == "success" else "host_delivery"
-    if status == "unknown":
-        failure_stage = "not_attempted_by_chip"
-    return {
-        "provider_id": request["provider_id"],
-        "voice_id_masked": runtime_state["tts"]["voice_id_masked"],
-        "voice_id_fingerprint": runtime_state["tts"]["voice_id_fingerprint"],
-        "mime_type": request["mime_type"],
-        "voice_compatible": bool(request["voice_compatible"]),
-        "audio_bytes": len(audio_bytes),
-        "synthesis_status": "success",
-        "telegram_delivery_status": status,
-        "telegram_delivery_ready": bool(delivery.get("ready")),
-        "failure_stage": failure_stage,
-        "failure_reason": str(delivery.get("last_failure_reason") or ""),
-        "delivery_boundary": (
-            "spark-voice-comms produced audio bytes; Telegram delivery is only proven after the host records sendVoice success."
-        ),
-    }
+    if not isinstance(request, str): request = str(request or '')
+    if not isinstance(resolved_voice_id, str): resolved_voice_id = str(resolved_voice_id or '')
+    if not isinstance(runtime_state, str): runtime_state = str(runtime_state or '')
+    try:
+        delivery = runtime_state["telegram_delivery"]
+        status = str(delivery.get("last_send_voice_status") or "unknown")
+        failure_stage = "" if status == "success" else "host_delivery"
+        if status == "unknown":
+            failure_stage = "not_attempted_by_chip"
+        return {
+            "provider_id": request["provider_id"],
+            "voice_id_masked": runtime_state["tts"]["voice_id_masked"],
+            "voice_id_fingerprint": runtime_state["tts"]["voice_id_fingerprint"],
+            "mime_type": request["mime_type"],
+            "voice_compatible": bool(request["voice_compatible"]),
+            "audio_bytes": len(audio_bytes),
+            "synthesis_status": "success",
+            "telegram_delivery_status": status,
+            "telegram_delivery_ready": bool(delivery.get("ready")),
+            "failure_stage": failure_stage,
+            "failure_reason": str(delivery.get("last_failure_reason") or ""),
+            "delivery_boundary": (
+                "spark-voice-comms produced audio bytes; Telegram delivery is only proven after the host records sendVoice success."
+            ),
+        }
 
 
+
+    except Exception:
+        return {}
 def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    caption_text = str(payload.get("caption_text") or "").strip()
-    spoken_text = str(request["text"])
-    mode = str(payload.get("coherence_mode") or "exact").strip() or "exact"
-    caption_fingerprint = _text_fingerprint(caption_text)
-    spoken_fingerprint = _text_fingerprint(spoken_text)
-    if caption_text:
-        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
-    else:
-        check = "passed"
-    return {
-        "mode": mode,
-        "spoken_text_characters": len(spoken_text),
-        "spoken_text_fingerprint": spoken_fingerprint,
-        "caption_text_characters": len(caption_text),
-        "caption_text_fingerprint": caption_fingerprint,
-        "caption_matches_spoken": bool(caption_text and caption_text == spoken_text),
-        "check": check,
-        "policy": "/voice speak reads exact supplied text; /voice ask must pass an already-generated answer into voice.speak.",
-    }
+    if not isinstance(request, str): request = str(request or '')
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        caption_text = str(payload.get("caption_text") or "").strip()
+        spoken_text = str(request["text"])
+        mode = str(payload.get("coherence_mode") or "exact").strip() or "exact"
+        caption_fingerprint = _text_fingerprint(caption_text)
+        spoken_fingerprint = _text_fingerprint(spoken_text)
+        if caption_text:
+            check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
+        else:
+            check = "passed"
+        return {
+            "mode": mode,
+            "spoken_text_characters": len(spoken_text),
+            "spoken_text_fingerprint": spoken_fingerprint,
+            "caption_text_characters": len(caption_text),
+            "caption_text_fingerprint": caption_fingerprint,
+            "caption_matches_spoken": bool(caption_text and caption_text == spoken_text),
+            "check": check,
+            "policy": "/voice speak reads exact supplied text; /voice ask must pass an already-generated answer into voice.speak.",
+        }
 
 
+
+    except Exception:
+        return {}
 def _merge_latency(latency_payload: Any, **updates: int) -> dict[str, int]:
-    latency = latency_payload if isinstance(latency_payload, dict) else {}
-    merged: dict[str, int] = {}
-    for key, value in latency.items():
-        try:
-            merged[str(key)] = max(0, int(float(value)))
-        except (TypeError, ValueError):
-            continue
-    for key, value in updates.items():
-        merged[key] = max(0, int(value))
-    return merged
+    try:
+        latency = latency_payload if isinstance(latency_payload, dict) else {}
+        merged: dict[str, int] = {}
+        for key, value in latency.items():
+            try:
+                merged[str(key)] = max(0, int(float(value)))
+            except (TypeError, ValueError):
+                continue
+        for key, value in updates.items():
+            merged[key] = max(0, int(value))
+        return merged
 
 
+
+    except Exception:
+        return {}
 def _elapsed_ms(started_at: float) -> int:
-    return max(0, int((time.perf_counter() - started_at) * 1000))
+    try:
+        return max(0, int((time.perf_counter() - started_at) * 1000))
 
 
+
+    except Exception:
+        return 0
 def _text_fingerprint(text: str) -> str:
-    if not text:
+    if not isinstance(text, str): text = str(text or '')
+    try:
+        if not text:
+            return ""
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+
+    except Exception:
         return ""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-
-
 def _missing_voice_secret_message(context: str) -> str:
     label = str(context or "Voice provider").strip() or "Voice provider"
     return (
