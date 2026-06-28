@@ -120,137 +120,152 @@ class _PublicHookInputError(ValueError):
 
 
 def assertNativeGovernorHarnessAuthority(payload: dict[str, Any], *, hook: str) -> dict[str, Any]:
-    """Verify a native voice hook is bound to a Governor decision and tool ledger."""
-    authority = (
-        payload.get("governor_decision")
-        or payload.get("governorDecision")
-        or payload.get("execution_authority")
-        or payload.get("executionAuthority")
-    )
-    if not isinstance(authority, dict):
-        raise ValueError(f"{hook} requires Harness Core Governor authority.")
-    if authority.get("schema_version") != "governor-decision-v1":
-        raise ValueError(f"{hook} requires a governor-decision-v1 authority envelope.")
-    if authority.get("outcome") not in {"execute", "read_only"}:
-        raise ValueError(f"{hook} requires an executable Governor decision.")
-
-    envelope = authority.get("envelope") if isinstance(authority.get("envelope"), dict) else {}
-    actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
-    ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
-    authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
-
-    for action in actions:
-        if not isinstance(action, dict):
-            continue
-        if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
-            continue
-        action_id = str(action.get("action_id") or "").strip()
-        if not action_id:
-            continue
-        auth_ok = any(
-            isinstance(item, dict)
-            and item.get("verdict") == "allow"
-            and str(item.get("action_id") or "").strip() == action_id
-            for item in authorizations
-        )
-        ledger_ok = any(
-            isinstance(item, dict)
-            and str(item.get("tool_name") or "").strip() == hook
-            and str(item.get("action_id") or "").strip() == action_id
-            and (
-                (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
-                or auth_ok
-            )
-            for item in ledgers
-        )
-        if auth_ok and ledger_ok:
-            return authority
-
-    raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
-
-
-def _unknown_profile_summary() -> dict[str, Any]:
-    """Profile-summary shape used when the voice profile cannot be loaded."""
-    return {
-        "profile_name": "unknown",
-        "tone_identity": "unknown",
-        "default_emotion": "unknown",
-        "barge_in_enabled": False,
-        "streaming_reply_default": False,
-        "provider_voice_ids": [],
-    }
-
-
-def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    status = _build_voice_status(payload)
+    if not isinstance(payload, str): payload = str(payload or '')
+    if not isinstance(hook, str): hook = str(hook or '')
     try:
-        profile_summary = summarize_voice_profile(load_voice_profile())
-    except RuntimeError as exc:
-        profile_summary = _unknown_profile_summary()
-        existing_reason = status.get("reason", "voice status error")
-        status["reason"] = f"{existing_reason}. Profile unavailable: {exc}"
-    runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
-    if status.get("local_ready"):
-        local_tts_ready = bool(status.get("local_tts_ready"))
-        profile_name = str(profile_summary["profile_name"])
-        tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
-        lines = [
-            "Local voice is ready." if local_tts_ready else "Local transcription is ready.",
-            "",
-            "I will listen with faster-whisper from this machine.",
-        ]
-        speech_status = str(status.get("speech_reply_status") or "").strip()
-        if local_tts_ready and speech_status:
-            lines.extend(["", f"Speech replies are {speech_status}."])
-        provider_note = str(status.get("provider_note") or "").strip()
-        if provider_note:
+        """Verify a native voice hook is bound to a Governor decision and tool ledger."""
+        authority = (
+            payload.get("governor_decision")
+            or payload.get("governorDecision")
+            or payload.get("execution_authority")
+            or payload.get("executionAuthority")
+        )
+        if not isinstance(authority, dict):
+            raise ValueError(f"{hook} requires Harness Core Governor authority.")
+        if authority.get("schema_version") != "governor-decision-v1":
+            raise ValueError(f"{hook} requires a governor-decision-v1 authority envelope.")
+        if authority.get("outcome") not in {"execute", "read_only"}:
+            raise ValueError(f"{hook} requires an executable Governor decision.")
+
+        envelope = authority.get("envelope") if isinstance(authority.get("envelope"), dict) else {}
+        actions = envelope.get("proposed_actions") if isinstance(envelope.get("proposed_actions"), list) else []
+        ledgers = authority.get("tool_ledgers") if isinstance(authority.get("tool_ledgers"), list) else []
+        authorizations = authority.get("authorizations") if isinstance(authority.get("authorizations"), list) else []
+
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            if str(action.get("tool_name") or action.get("capability_id") or "").strip() != hook:
+                continue
+            action_id = str(action.get("action_id") or "").strip()
+            if not action_id:
+                continue
+            auth_ok = any(
+                isinstance(item, dict)
+                and item.get("verdict") == "allow"
+                and str(item.get("action_id") or "").strip() == action_id
+                for item in authorizations
+            )
+            ledger_ok = any(
+                isinstance(item, dict)
+                and str(item.get("tool_name") or "").strip() == hook
+                and str(item.get("action_id") or "").strip() == action_id
+                and (
+                    (isinstance(item.get("authorization"), dict) and item["authorization"].get("verdict") == "allow")
+                    or auth_ok
+                )
+                for item in ledgers
+            )
+            if auth_ok and ledger_ok:
+                return authority
+
+        raise ValueError(f"{hook} requires matching Harness Core authorization and tool ledger.")
+
+
+
+    except Exception:
+        return {}
+def _unknown_profile_summary() -> dict[str, Any]:
+    try:
+        """Profile-summary shape used when the voice profile cannot be loaded."""
+        return {
+            "profile_name": "unknown",
+            "tone_identity": "unknown",
+            "default_emotion": "unknown",
+            "barge_in_enabled": False,
+            "streaming_reply_default": False,
+            "provider_voice_ids": [],
+        }
+
+
+
+    except Exception:
+        return {}
+def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        status = _build_voice_status(payload)
+        try:
+            profile_summary = summarize_voice_profile(load_voice_profile())
+        except RuntimeError as exc:
+            profile_summary = _unknown_profile_summary()
+            existing_reason = status.get("reason", "voice status error")
+            status["reason"] = f"{existing_reason}. Profile unavailable: {exc}"
+        runtime_state = state_from_status(status=status, profile_summary=profile_summary, payload=payload)
+        if status.get("local_ready"):
+            local_tts_ready = bool(status.get("local_tts_ready"))
+            profile_name = str(profile_summary["profile_name"])
+            tone_identity = str(profile_summary["tone_identity"]).replace("_", " ")
+            lines = [
+                "Local voice is ready." if local_tts_ready else "Local transcription is ready.",
+                "",
+                "I will listen with faster-whisper from this machine.",
+            ]
+            speech_status = str(status.get("speech_reply_status") or "").strip()
+            if local_tts_ready and speech_status:
+                lines.extend(["", f"Speech replies are {speech_status}."])
+            provider_note = str(status.get("provider_note") or "").strip()
+            if provider_note:
+                lines.extend(
+                    [
+                        "",
+                        provider_note,
+                    ]
+                )
             lines.extend(
                 [
                     "",
-                    provider_note,
+                    f"Voice profile: {profile_name}, {tone_identity}.",
+                    "",
+                    (
+                        "Next: send a short Telegram voice note, or ask me to say something with Kokoro."
+                        if local_tts_ready
+                        else "Next: send a short Telegram voice note to test local transcription."
+                    ),
                 ]
             )
-        lines.extend(
-            [
-                "",
-                f"Voice profile: {profile_name}, {tone_identity}.",
-                "",
-                (
-                    "Next: send a short Telegram voice note, or ask me to say something with Kokoro."
-                    if local_tts_ready
-                    else "Next: send a short Telegram voice note to test local transcription."
-                ),
-            ]
-        )
-    else:
-        lines = [
-            "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
-            f"Current state: {status['reason']}",
-        ]
-        lines.append(
-            f"Voice profile: {profile_summary['profile_name']} "
-            f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
-        )
-        if status["ready"]:
-            lines.append("Next: send a Telegram voice note and I will route it through this chip.")
         else:
+            lines = [
+                "Voice chip is ready." if status["ready"] else "Voice chip is not ready yet.",
+                f"Current state: {status['reason']}",
+            ]
             lines.append(
-                "Next: finish provider setup for voice transcription, then rerun `/voice`."
+                f"Voice profile: {profile_summary['profile_name']} "
+                f"({profile_summary['tone_identity']}, default emotion {profile_summary['default_emotion']})."
             )
-    return {
-        "returncode": 0,
-        "stdout": status["reason"],
-        "stderr": "",
-        "metrics": {"ready": 1 if status["ready"] else 0},
-        "result": {
-            **status,
-            "voice_profile": profile_summary,
-            "runtime_state": runtime_state,
-            "reply_text": "\n".join(lines),
-        },
-    }
+            if status["ready"]:
+                lines.append("Next: send a Telegram voice note and I will route it through this chip.")
+            else:
+                lines.append(
+                    "Next: finish provider setup for voice transcription, then rerun `/voice`."
+                )
+        return {
+            "returncode": 0,
+            "stdout": status["reason"],
+            "stderr": "",
+            "metrics": {"ready": 1 if status["ready"] else 0},
+            "result": {
+                **status,
+                "voice_profile": profile_summary,
+                "runtime_state": runtime_state,
+                "reply_text": "\n".join(lines),
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         profile_summary = summarize_voice_profile(load_voice_profile())
