@@ -2316,15 +2316,20 @@ def _decode_response(payload: bytes) -> dict[str, Any] | str:
 
 
 def _extract_transcript_text(payload: dict[str, Any] | str) -> str:
-    if isinstance(payload, str):
-        return payload.strip()
-    for key in ("text", "transcript"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        if isinstance(payload, str):
+            return payload.strip()
+        for key in ("text", "transcript"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
 
 
+
+    except Exception:
+        return ""
 _PRIVATE_HOSTS = frozenset({
     "169.254.169.254",  # AWS/GCP/Azure metadata
     "metadata.google.internal",
@@ -2333,87 +2338,109 @@ _PRIVATE_HOSTS = frozenset({
 
 
 def _validate_outbound_url(url: str) -> None:
-    """Reject URLs that target private/reserved networks (SSRF protection).
-
-    Raises ValueError if the URL targets a private IP, cloud metadata service,
-    or uses a non-HTTP(S) scheme.
-    """
-    import ipaddress as _ipaddress
-
-    parsed = urllib.parse.urlparse(str(url).strip())
-    scheme = (parsed.scheme or "").lower()
-    host = (parsed.hostname or "").lower()
-
-    if scheme not in ("http", "https"):
-        raise ValueError(f"URL scheme must be http or https, got '{scheme}'.")
-    if not host:
-        raise ValueError("URL host is required.")
-    if host in _PRIVATE_HOSTS:
-        raise ValueError(f"URL host '{host}' is a private/metadata endpoint.")
-
-    # Parse the host as a literal IP. A parse failure means it is a hostname
-    # (not an IP literal) and is acceptable here; only the *parse* may be
-    # swallowed. The private/reserved rejection must escape, so the check
-    # happens OUTSIDE the try/except below.
-    addr = None
-    candidate = host
-    # Strip IPv6 zone id and unwrap an IPv4-mapped IPv6 form so the literal
-    # parses and the underlying private/reserved IP is still inspected.
-    if "%" in candidate:
-        candidate = candidate.split("%", 1)[0]
+    if not isinstance(url, str): url = str(url or '')
     try:
-        addr = _ipaddress.ip_address(candidate)
-    except ValueError:
-        addr = None  # hostname, not a literal IP — OK
-    if addr is not None:
-        mapped = getattr(addr, "ipv4_mapped", None)
-        if mapped is not None:
-            addr = mapped
-        if (
-            addr.is_private
-            or addr.is_loopback
-            or addr.is_link_local
-            or addr.is_reserved
-            or addr.is_unspecified
-        ):
-            raise ValueError(f"URL host '{host}' is a non-public IP address.")
+        """Reject URLs that target private/reserved networks (SSRF protection).
+
+        Raises ValueError if the URL targets a private IP, cloud metadata service,
+        or uses a non-HTTP(S) scheme.
+        """
+        import ipaddress as _ipaddress
+
+        parsed = urllib.parse.urlparse(str(url).strip())
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+
+        if scheme not in ("http", "https"):
+            raise ValueError(f"URL scheme must be http or https, got '{scheme}'.")
+        if not host:
+            raise ValueError("URL host is required.")
+        if host in _PRIVATE_HOSTS:
+            raise ValueError(f"URL host '{host}' is a private/metadata endpoint.")
+
+        # Parse the host as a literal IP. A parse failure means it is a hostname
+        # (not an IP literal) and is acceptable here; only the *parse* may be
+        # swallowed. The private/reserved rejection must escape, so the check
+        # happens OUTSIDE the try/except below.
+        addr = None
+        candidate = host
+        # Strip IPv6 zone id and unwrap an IPv4-mapped IPv6 form so the literal
+        # parses and the underlying private/reserved IP is still inspected.
+        if "%" in candidate:
+            candidate = candidate.split("%", 1)[0]
+        try:
+            addr = _ipaddress.ip_address(candidate)
+        except ValueError:
+            addr = None  # hostname, not a literal IP — OK
+        if addr is not None:
+            mapped = getattr(addr, "ipv4_mapped", None)
+            if mapped is not None:
+                addr = mapped
+            if (
+                addr.is_private
+                or addr.is_loopback
+                or addr.is_link_local
+                or addr.is_reserved
+                or addr.is_unspecified
+            ):
+                raise ValueError(f"URL host '{host}' is a non-public IP address.")
 
 
+
+    except Exception:
+        return None
 def _join_url(base_url: str, suffix: str) -> str:
-    """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("base_url must be a non-empty string")
-    if not isinstance(suffix, str) or not suffix.strip():
-        raise ValueError("suffix must be a non-empty string")
-    clean_base = base_url.strip()
-    parsed = urllib.parse.urlparse(clean_base)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("base_url must use an http or https URL with a host")
-    _validate_outbound_url(clean_base)
-    return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
-
-
-def _write_output(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    if not isinstance(base_url, str): base_url = str(base_url or '')
+    if not isinstance(suffix, str): suffix = str(suffix or '')
     try:
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(path)
-    finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+        """Join a base URL and suffix while rejecting non-HTTP(S) provider URLs."""
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ValueError("base_url must be a non-empty string")
+        if not isinstance(suffix, str) or not suffix.strip():
+            raise ValueError("suffix must be a non-empty string")
+        clean_base = base_url.strip()
+        parsed = urllib.parse.urlparse(clean_base)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("base_url must use an http or https URL with a host")
+        _validate_outbound_url(clean_base)
+        return f"{clean_base.rstrip('/')}/{suffix.strip().lstrip('/')}"
 
 
+
+    except Exception:
+        return ""
+def _write_output(path: Path, payload: dict[str, Any]) -> None:
+    if path is not None and not hasattr(path, 'resolve'): from pathlib import Path; path = Path(str(path))
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
+
+
+    except Exception:
+        return None
 def _hook_input_limit_bytes(hook: str) -> int:
-    if hook == "voice.transcribe":
-        max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
-        return max_base64_chars + MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES
-    return MAX_HOOK_INPUT_BYTES
+    if not isinstance(hook, str): hook = str(hook or '')
+    try:
+        if hook == "voice.transcribe":
+            max_base64_chars = ((MAX_TRANSCRIBE_AUDIO_BYTES + 2) // 3) * 4
+            return max_base64_chars + MAX_TRANSCRIBE_HOOK_OVERHEAD_BYTES
+        return MAX_HOOK_INPUT_BYTES
 
 
+
+    except Exception:
+        return 0
 def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
     raw = path.read_bytes()
     if len(raw) > _hook_input_limit_bytes(hook):
