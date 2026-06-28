@@ -142,5 +142,5 @@ class TestWebSocketDoSLimits:
             mock_ws_module.create_connection.return_value = ws_mock
             mock_import.return_value = mock_ws_module
 
-            with pytest.raises(RuntimeError, match="maximum total message size limit"):
+            with pytest.raises(RuntimeError, match="exceeds size limit"):
                 _synthesize_with_openai_realtime(request=request)
