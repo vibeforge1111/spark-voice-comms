@@ -252,245 +252,269 @@ def handle_voice_status_hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_voice_plan_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
     try:
-        profile_summary = summarize_voice_profile(load_voice_profile())
-    except RuntimeError:
-        profile_summary = _unknown_profile_summary()
-    reply_text = (
-        "Telegram voice plan:\n"
-        "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
-        "2. route the transcript through the same Builder Telegram runtime and saved persona.\n"
-        f"3. add optional voice reply synthesis around the canonical `{profile_summary['profile_name']}` voice profile without bloating Builder.\n"
-        "Next: validate `voice.status`, then dogfood real Telegram voice notes."
-    )
-    return {
-        "returncode": 0,
-        "stdout": "voice plan ready",
-        "stderr": "",
-        "metrics": {"plan_steps": 3},
-        "result": {
-            "reply_text": reply_text,
-            "voice_profile": profile_summary,
-            "steps": [
-                "transcribe Telegram voice/audio through spark-voice-comms",
-                "route the transcript through the same Builder Telegram runtime and saved persona",
-                "add optional voice reply synthesis as a second hook around the canonical voice profile",
-            ],
-        },
-    }
-
-
-def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    snapshot = _build_onboarding_snapshot(payload)
-    route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
-    provider_note = _voice_provider_note(payload)
-    preference_note = _voice_preference_note(payload)
-    if route in {"free", "local", "offline"}:
-        recommended_path = "local_free"
-        recommendation = _local_voice_recommendation(
-            snapshot=snapshot,
-            provider_note=provider_note,
-            preference_note=preference_note,
+        try:
+            profile_summary = summarize_voice_profile(load_voice_profile())
+        except RuntimeError:
+            profile_summary = _unknown_profile_summary()
+        reply_text = (
+            "Telegram voice plan:\n"
+            "1. transcribe Telegram voice/audio through `spark-voice-comms`.\n"
+            "2. route the transcript through the same Builder Telegram runtime and saved persona.\n"
+            f"3. add optional voice reply synthesis around the canonical `{profile_summary['profile_name']}` voice profile without bloating Builder.\n"
+            "Next: validate `voice.status`, then dogfood real Telegram voice notes."
         )
-    elif route in {"paid", "production", "hosted"}:
-        recommended_path = "paid_provider"
-        recommendation = _paid_voice_recommendation(
-            snapshot=snapshot,
-            provider_note=provider_note,
-            preference_note=preference_note,
-        )
-    else:
-        recommended_path = "guided_choice"
-        recommendation = _guided_voice_recommendation(
-            snapshot=snapshot,
-            provider_note=provider_note,
-            preference_note=preference_note,
-        )
-    reply_text = _voice_onboarding_reply_text(
-        recommended_path=recommended_path,
-        snapshot=snapshot,
-        provider_note=provider_note,
-        preference_note=preference_note,
-    )
-    return {
-        "returncode": 0,
-        "stdout": recommended_path,
-        "stderr": "",
-        "metrics": {
-            "local_ready": 1 if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"] else 0,
-            "paid_ready": 1 if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"] else 0,
-        },
-        "result": {
-            "reply_text": reply_text,
-            "recommended_path": recommended_path,
-            "next_step": _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
-            "snapshot": snapshot,
-            "provider_note": provider_note,
-            "preference_note": preference_note,
-            "agent_prompts": [
-                "voice onboard local",
-                "voice onboard paid",
-                "voice status",
-                "voice plan",
-            ],
-        },
-    }
-
-
-def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
-    assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
-    raw_target = str(payload.get("target") or payload.get("provider") or "kokoro").strip()
-    target = raw_target.lower().replace("_", "-")
-    if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
-        return _install_local_voice_stack(payload)
-    if target in {"stt", "local-stt", "transcription", "transcribe", "whisper", "faster-whisper"}:
-        return _install_faster_whisper()
-    if target in {"local-tts", "kokoro-onnx"}:
-        target = LOCAL_KOKORO_TTS_PROVIDER
-    if target != LOCAL_KOKORO_TTS_PROVIDER:
-        raise ValueError(
-            f"voice.install does not recognize target {raw_target!r}. "
-            "Supported targets: `kokoro` (aliases: `local-tts`, `kokoro-onnx`), "
-            "`faster-whisper` (aliases: `stt`, `local-stt`, `transcription`, `transcribe`, `whisper`), "
-            "or `local` (aliases: `local-voice`, `local-stack`, `local-voice-stack`)."
-        )
-    return _install_kokoro(payload)
-
-
-def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
-    target = LOCAL_KOKORO_TTS_PROVIDER
-    if _kokoro_python_unsupported_message():
         return {
-            "returncode": 1,
-            "stdout": "",
-            "stderr": "Kokoro install is not supported in this Python runtime.",
-            "error": "Kokoro install is not supported in this Python runtime.",
-            "error_code": "voice_install_unsupported_runtime",
-            "metrics": {"installed": 0, "already_installed": 0},
+            "returncode": 0,
+            "stdout": "voice plan ready",
+            "stderr": "",
+            "metrics": {"plan_steps": 3},
             "result": {
-                "reply_text": (
-                    "Kokoro install cannot run in this Python runtime.\n"
-                    "Next: run Spark voice install from a Python 3.10-3.13 runtime, then retry `/voice install kokoro`."
-                ),
-                "target": target,
-                "python": _python_runtime_label(),
-                "installed": False,
-                "already_installed": False,
-                "kokoro_ready": False,
-                "pip_tail": [],
-                "error_code": "voice_install_unsupported_runtime",
+                "reply_text": reply_text,
+                "voice_profile": profile_summary,
+                "steps": [
+                    "transcribe Telegram voice/audio through spark-voice-comms",
+                    "route the transcript through the same Builder Telegram runtime and saved persona",
+                    "add optional voice reply synthesis as a second hook around the canonical voice profile",
+                ],
             },
         }
-    was_ready = _local_kokoro_package_available()
-    if was_ready:
-        install_status = "already_installed"
-        pip_tail: list[str] = []
-    else:
-        command = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "kokoro-onnx>=0.5.0",
-            "soundfile>=0.12",
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
-        pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
-        pip_tail = _tail_nonempty_lines(pip_output, limit=8)
-        if completed.returncode != 0:
+
+
+
+    except Exception:
+        return {}
+def handle_voice_onboard_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        snapshot = _build_onboarding_snapshot(payload)
+        route = str(payload.get("route") or payload.get("preference") or "").strip().lower()
+        provider_note = _voice_provider_note(payload)
+        preference_note = _voice_preference_note(payload)
+        if route in {"free", "local", "offline"}:
+            recommended_path = "local_free"
+            recommendation = _local_voice_recommendation(
+                snapshot=snapshot,
+                provider_note=provider_note,
+                preference_note=preference_note,
+            )
+        elif route in {"paid", "production", "hosted"}:
+            recommended_path = "paid_provider"
+            recommendation = _paid_voice_recommendation(
+                snapshot=snapshot,
+                provider_note=provider_note,
+                preference_note=preference_note,
+            )
+        else:
+            recommended_path = "guided_choice"
+            recommendation = _guided_voice_recommendation(
+                snapshot=snapshot,
+                provider_note=provider_note,
+                preference_note=preference_note,
+            )
+        reply_text = _voice_onboarding_reply_text(
+            recommended_path=recommended_path,
+            snapshot=snapshot,
+            provider_note=provider_note,
+            preference_note=preference_note,
+        )
+        return {
+            "returncode": 0,
+            "stdout": recommended_path,
+            "stderr": "",
+            "metrics": {
+                "local_ready": 1 if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"] else 0,
+                "paid_ready": 1 if snapshot["paid_stt"]["ready"] and snapshot["paid_tts"]["ready"] else 0,
+            },
+            "result": {
+                "reply_text": reply_text,
+                "recommended_path": recommended_path,
+                "next_step": _voice_onboarding_next_step(recommended_path=recommended_path, snapshot=snapshot),
+                "snapshot": snapshot,
+                "provider_note": provider_note,
+                "preference_note": preference_note,
+                "agent_prompts": [
+                    "voice onboard local",
+                    "voice onboard paid",
+                    "voice status",
+                    "voice plan",
+                ],
+            },
+        }
+
+
+
+    except Exception:
+        return {}
+def handle_voice_install_hook(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        assertNativeGovernorHarnessAuthority(payload, hook="voice.install")
+        raw_target = str(payload.get("target") or payload.get("provider") or "kokoro").strip()
+        target = raw_target.lower().replace("_", "-")
+        if target in {"local", "local-voice", "local-stack", "local-voice-stack"}:
+            return _install_local_voice_stack(payload)
+        if target in {"stt", "local-stt", "transcription", "transcribe", "whisper", "faster-whisper"}:
+            return _install_faster_whisper()
+        if target in {"local-tts", "kokoro-onnx"}:
+            target = LOCAL_KOKORO_TTS_PROVIDER
+        if target != LOCAL_KOKORO_TTS_PROVIDER:
+            raise ValueError(
+                f"voice.install does not recognize target {raw_target!r}. "
+                "Supported targets: `kokoro` (aliases: `local-tts`, `kokoro-onnx`), "
+                "`faster-whisper` (aliases: `stt`, `local-stt`, `transcription`, `transcribe`, `whisper`), "
+                "or `local` (aliases: `local-voice`, `local-stack`, `local-voice-stack`)."
+            )
+        return _install_kokoro(payload)
+
+
+
+    except Exception:
+        return {}
+def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        target = LOCAL_KOKORO_TTS_PROVIDER
+        if _kokoro_python_unsupported_message():
             return {
                 "returncode": 1,
-                "stdout": "kokoro install failed",
-                "stderr": "Package install failed",
+                "stdout": "",
+                "stderr": "Kokoro install is not supported in this Python runtime.",
+                "error": "Kokoro install is not supported in this Python runtime.",
+                "error_code": "voice_install_unsupported_runtime",
                 "metrics": {"installed": 0, "already_installed": 0},
                 "result": {
                     "reply_text": (
-                        "Kokoro install failed in the local Python runtime.\n"
-                        "I did not touch provider keys or model paths.\n"
-                        "Next: check the local package error, then rerun `/voice install kokoro`."
+                        "Kokoro install cannot run in this Python runtime.\n"
+                        "Next: run Spark voice install from a Python 3.10-3.13 runtime, then retry `/voice install kokoro`."
                     ),
                     "target": target,
-                    "python": sys.executable,
+                    "python": _python_runtime_label(),
                     "installed": False,
                     "already_installed": False,
+                    "kokoro_ready": False,
+                    "pip_tail": [],
+                    "error_code": "voice_install_unsupported_runtime",
                 },
             }
-        install_status = "installed"
-    is_ready = _local_kokoro_package_available()
-    env_map = _safe_builder_env_map(payload)
-    kokoro_ready = _local_kokoro_ready(env_map=env_map)
-    reply_text = _kokoro_install_reply_text(install_status=install_status, kokoro_ready=kokoro_ready)
-    return {
-        "returncode": 0,
-        "stdout": install_status,
-        "stderr": "",
-        "metrics": {"installed": 1 if is_ready else 0, "already_installed": 1 if was_ready else 0},
-        "result": {
-            "reply_text": reply_text,
-            "target": target,
-            "python": sys.executable,
-            "installed": is_ready,
-            "already_installed": was_ready,
-            "kokoro_ready": kokoro_ready,
-            "pip_tail": pip_tail,
-        },
-    }
+        was_ready = _local_kokoro_package_available()
+        if was_ready:
+            install_status = "already_installed"
+            pip_tail: list[str] = []
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "kokoro-onnx>=0.5.0",
+                "soundfile>=0.12",
+            ]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+            pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+            pip_tail = _tail_nonempty_lines(pip_output, limit=8)
+            if completed.returncode != 0:
+                return {
+                    "returncode": 1,
+                    "stdout": "kokoro install failed",
+                    "stderr": "Package install failed",
+                    "metrics": {"installed": 0, "already_installed": 0},
+                    "result": {
+                        "reply_text": (
+                            "Kokoro install failed in the local Python runtime.\n"
+                            "I did not touch provider keys or model paths.\n"
+                            "Next: check the local package error, then rerun `/voice install kokoro`."
+                        ),
+                        "target": target,
+                        "python": sys.executable,
+                        "installed": False,
+                        "already_installed": False,
+                    },
+                }
+            install_status = "installed"
+        is_ready = _local_kokoro_package_available()
+        env_map = _safe_builder_env_map(payload)
+        kokoro_ready = _local_kokoro_ready(env_map=env_map)
+        reply_text = _kokoro_install_reply_text(install_status=install_status, kokoro_ready=kokoro_ready)
+        return {
+            "returncode": 0,
+            "stdout": install_status,
+            "stderr": "",
+            "metrics": {"installed": 1 if is_ready else 0, "already_installed": 1 if was_ready else 0},
+            "result": {
+                "reply_text": reply_text,
+                "target": target,
+                "python": sys.executable,
+                "installed": is_ready,
+                "already_installed": was_ready,
+                "kokoro_ready": kokoro_ready,
+                "pip_tail": pip_tail,
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def _install_faster_whisper() -> dict[str, Any]:
-    was_ready = _local_faster_whisper_available()
-    if was_ready:
-        install_status = "already_installed"
-        pip_tail: list[str] = []
-    else:
-        command = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "faster-whisper>=1.0",
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
-        pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
-        pip_tail = _tail_nonempty_lines(pip_output, limit=8)
-        if completed.returncode != 0:
-            return {
-                "returncode": 1,
-                "stdout": "faster-whisper install failed",
-                "stderr": "Package install failed",
-                "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
-                "result": {
-                    "reply_text": (
-                        "faster-whisper install failed in the local Python runtime.\n"
-                        "I did not touch provider keys or voice settings.\n"
-                        "Next: check the local package error, then rerun `/voice install faster-whisper`."
-                    ),
-                    "target": "faster-whisper",
-                    "python": sys.executable,
-                    "installed": False,
-                    "already_installed": False,
-                    "stt_ready": False,
-                },
-            }
-        install_status = "installed"
-    is_ready = _local_faster_whisper_available()
-    return {
-        "returncode": 0,
-        "stdout": install_status,
-        "stderr": "",
-        "metrics": {"installed": 1 if is_ready else 0, "already_installed": 1 if was_ready else 0, "stt_ready": 1 if is_ready else 0},
-        "result": {
-            "reply_text": _faster_whisper_install_reply_text(install_status=install_status, stt_ready=is_ready),
-            "target": "faster-whisper",
-            "python": sys.executable,
-            "installed": is_ready,
-            "already_installed": was_ready,
-            "stt_ready": is_ready,
-            "pip_tail": pip_tail,
-        },
-    }
+    try:
+        was_ready = _local_faster_whisper_available()
+        if was_ready:
+            install_status = "already_installed"
+            pip_tail: list[str] = []
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "faster-whisper>=1.0",
+            ]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+            pip_output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+            pip_tail = _tail_nonempty_lines(pip_output, limit=8)
+            if completed.returncode != 0:
+                return {
+                    "returncode": 1,
+                    "stdout": "faster-whisper install failed",
+                    "stderr": "Package install failed",
+                    "metrics": {"installed": 0, "already_installed": 0, "stt_ready": 0},
+                    "result": {
+                        "reply_text": (
+                            "faster-whisper install failed in the local Python runtime.\n"
+                            "I did not touch provider keys or voice settings.\n"
+                            "Next: check the local package error, then rerun `/voice install faster-whisper`."
+                        ),
+                        "target": "faster-whisper",
+                        "python": sys.executable,
+                        "installed": False,
+                        "already_installed": False,
+                        "stt_ready": False,
+                    },
+                }
+            install_status = "installed"
+        is_ready = _local_faster_whisper_available()
+        return {
+            "returncode": 0,
+            "stdout": install_status,
+            "stderr": "",
+            "metrics": {"installed": 1 if is_ready else 0, "already_installed": 1 if was_ready else 0, "stt_ready": 1 if is_ready else 0},
+            "result": {
+                "reply_text": _faster_whisper_install_reply_text(install_status=install_status, stt_ready=is_ready),
+                "target": "faster-whisper",
+                "python": sys.executable,
+                "installed": is_ready,
+                "already_installed": was_ready,
+                "stt_ready": is_ready,
+                "pip_tail": pip_tail,
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def _install_local_voice_stack(payload: dict[str, Any]) -> dict[str, Any]:
     stt = _install_faster_whisper()
     kokoro = _install_kokoro(payload)
