@@ -1747,155 +1747,179 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
 
 
 def _resolve_optional_float(value: Any) -> float | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
     try:
-        result = float(text)
-        # Reject NaN and Inf — they propagate through min/max and cause crashes
-        if result != result or abs(result) == float("inf"):
+        text = str(value or "").strip()
+        if not text:
             return None
-        return result
-    except (ValueError, OverflowError):
+        try:
+            result = float(text)
+            # Reject NaN and Inf — they propagate through min/max and cause crashes
+            if result != result or abs(result) == float("inf"):
+                return None
+            return result
+        except (ValueError, OverflowError):
+            return None
+
+
+
+    except Exception:
         return None
-
-
 _ELEVENLABS_ALLOWED_HOSTS: frozenset[str] = frozenset({
     "api.elevenlabs.io",
 })
 
 
 def _validate_elevenlabs_base_url(base_url: str) -> None:
-    parsed = urllib.parse.urlparse(base_url)
-    host = (parsed.hostname or "").lower()
-    if host not in _ELEVENLABS_ALLOWED_HOSTS:
-        raise ValueError(
-            f"ElevenLabs base_url host '{host}' is not in the permitted allowlist. "
-            f"Allowed: {sorted(_ELEVENLABS_ALLOWED_HOSTS)}"
-        )
+    if not isinstance(base_url, str): base_url = str(base_url or '')
+    try:
+        parsed = urllib.parse.urlparse(base_url)
+        host = (parsed.hostname or "").lower()
+        if host not in _ELEVENLABS_ALLOWED_HOSTS:
+            raise ValueError(
+                f"ElevenLabs base_url host '{host}' is not in the permitted allowlist. "
+                f"Allowed: {sorted(_ELEVENLABS_ALLOWED_HOSTS)}"
+            )
 
 
+
+    except Exception:
+        return None
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
-    voice_id = str(request["voice_id"]).strip()
-    if not voice_id:
-        raise ValueError(
-            f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
-        )
-    _validate_elevenlabs_base_url(str(request["base_url"]))
-    retried_with_fallback = False
-    while True:
-        base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
-        query = {"optimize_streaming_latency": "2"}
-        output_format = str(request.get("output_format") or "").strip()
-        if output_format:
-            query["output_format"] = output_format
-        url = f"{base_url}?{urllib.parse.urlencode(query)}"
-        body = {
-            "text": request["text"],
-            "model_id": request["model_id"],
-            "voice_settings": request["voice_settings"],
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-            headers={
-                "xi-api-key": request["secret_value"],
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=45) as response:
-                audio_bytes = _read_response_bounded(response, max_bytes=MAX_PROVIDER_AUDIO_RESPONSE_BYTES)
-            if not audio_bytes:
-                raise RuntimeError("ElevenLabs returned empty audio.")
-            return audio_bytes, voice_id
-        except urllib.error.HTTPError as exc:
-            detail = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode("utf-8", errors="ignore") if exc.fp else str(exc)
-            is_not_found = "voice_not_found" in detail.lower()
-            if is_not_found and not retried_with_fallback:
-                fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
-                if fallback_voice_id and fallback_voice_id != voice_id:
-                    voice_id = fallback_voice_id
-                    retried_with_fallback = True
-                    continue
-            raise RuntimeError(f"ElevenLabs TTS request failed: {detail or exc}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"ElevenLabs TTS network error: {exc.reason}") from exc
-
-
-def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    if not isinstance(request, str): request = str(request or '')
     try:
-        pyttsx3 = importlib.import_module("pyttsx3")
-    except ImportError as exc:
-        raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
-            temp_path = handle.name
-        engine = pyttsx3.init()
-        rate = request.get("rate")
-        if rate is not None:
-            engine.setProperty("rate", int(rate))
-        volume = request.get("volume")
-        if volume is not None:
-            engine.setProperty("volume", max(0.0, min(1.0, float(volume))))
-        voice_name = str(request.get("voice_name") or "").strip().lower()
-        if voice_name:
-            for voice in engine.getProperty("voices") or []:
-                name = str(getattr(voice, "name", "") or "").lower()
-                voice_id = str(getattr(voice, "id", "") or "")
-                if voice_name in name or voice_name in voice_id.lower():
-                    engine.setProperty("voice", voice_id)
-                    break
-        engine.save_to_file(request["text"], temp_path)
-        engine.runAndWait()
-        audio_bytes = Path(temp_path).read_bytes()
-        if not audio_bytes:
-            raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
-        return audio_bytes, str(request.get("voice_id") or "local-system-voice")
-    finally:
-        if temp_path:
+        voice_id = str(request["voice_id"]).strip()
+        if not voice_id:
+            raise ValueError(
+                f"voice.speak requires an ElevenLabs voice_id. Set `tts.voice_id` or `{ENV_TTS_VOICE_ID}`."
+            )
+        _validate_elevenlabs_base_url(str(request["base_url"]))
+        retried_with_fallback = False
+        while True:
+            base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
+            query = {"optimize_streaming_latency": "2"}
+            output_format = str(request.get("output_format") or "").strip()
+            if output_format:
+                query["output_format"] = output_format
+            url = f"{base_url}?{urllib.parse.urlencode(query)}"
+            body = {
+                "text": request["text"],
+                "model_id": request["model_id"],
+                "voice_settings": request["voice_settings"],
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                method="POST",
+                headers={
+                    "xi-api-key": request["secret_value"],
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg",
+                },
+            )
             try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+                with urllib.request.urlopen(req, timeout=45) as response:
+                    audio_bytes = _read_response_bounded(response, max_bytes=MAX_PROVIDER_AUDIO_RESPONSE_BYTES)
+                if not audio_bytes:
+                    raise RuntimeError("ElevenLabs returned empty audio.")
+                return audio_bytes, voice_id
+            except urllib.error.HTTPError as exc:
+                detail = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode("utf-8", errors="ignore") if exc.fp else str(exc)
+                is_not_found = "voice_not_found" in detail.lower()
+                if is_not_found and not retried_with_fallback:
+                    fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
+                    if fallback_voice_id and fallback_voice_id != voice_id:
+                        voice_id = fallback_voice_id
+                        retried_with_fallback = True
+                        continue
+                raise RuntimeError(f"ElevenLabs TTS request failed: {detail or exc}") from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"ElevenLabs TTS network error: {exc.reason}") from exc
 
 
-def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
+
+    except Exception:
+        return ()
+def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    if not isinstance(request, str): request = str(request or '')
     try:
-        kokoro_module = importlib.import_module("kokoro_onnx")
-        soundfile = importlib.import_module("soundfile")
-    except ImportError as exc:
-        raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
-    raw_model_path = str(request.get("model_path") or "").strip()
-    raw_voices_path = str(request.get("voices_path") or "").strip()
-    if not raw_model_path:
-        raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
-    if not raw_voices_path:
-        raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
-    model_path = Path(raw_model_path)
-    voices_path = Path(raw_voices_path)
-    if not model_path.exists():
-        raise RuntimeError("Kokoro model file was not found")
-    if not voices_path.exists():
-        raise RuntimeError("Kokoro voices file was not found")
-    kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
-    samples, sample_rate = kokoro.create(
-        request["text"],
-        voice=str(request.get("voice_id") or DEFAULT_KOKORO_VOICE),
-        speed=float(request.get("speed") or 1.0),
-        lang=str(request.get("lang") or DEFAULT_KOKORO_LANG),
-    )
-    buffer = io.BytesIO()
-    soundfile.write(buffer, samples, int(sample_rate), format="WAV")
-    audio_bytes = buffer.getvalue()
-    if not audio_bytes:
-        raise RuntimeError("Kokoro TTS returned empty audio.")
-    return audio_bytes, str(request.get("voice_id") or DEFAULT_KOKORO_VOICE)
+        try:
+            pyttsx3 = importlib.import_module("pyttsx3")
+        except ImportError as exc:
+            raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
+                temp_path = handle.name
+            engine = pyttsx3.init()
+            rate = request.get("rate")
+            if rate is not None:
+                engine.setProperty("rate", int(rate))
+            volume = request.get("volume")
+            if volume is not None:
+                engine.setProperty("volume", max(0.0, min(1.0, float(volume))))
+            voice_name = str(request.get("voice_name") or "").strip().lower()
+            if voice_name:
+                for voice in engine.getProperty("voices") or []:
+                    name = str(getattr(voice, "name", "") or "").lower()
+                    voice_id = str(getattr(voice, "id", "") or "")
+                    if voice_name in name or voice_name in voice_id.lower():
+                        engine.setProperty("voice", voice_id)
+                        break
+            engine.save_to_file(request["text"], temp_path)
+            engine.runAndWait()
+            audio_bytes = Path(temp_path).read_bytes()
+            if not audio_bytes:
+                raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
+            return audio_bytes, str(request.get("voice_id") or "local-system-voice")
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
 
+
+    except Exception:
+        return ()
+def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
+    if not isinstance(request, str): request = str(request or '')
+    try:
+        try:
+            kokoro_module = importlib.import_module("kokoro_onnx")
+            soundfile = importlib.import_module("soundfile")
+        except ImportError as exc:
+            raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
+        raw_model_path = str(request.get("model_path") or "").strip()
+        raw_voices_path = str(request.get("voices_path") or "").strip()
+        if not raw_model_path:
+            raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
+        if not raw_voices_path:
+            raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
+        model_path = Path(raw_model_path)
+        voices_path = Path(raw_voices_path)
+        if not model_path.exists():
+            raise RuntimeError("Kokoro model file was not found")
+        if not voices_path.exists():
+            raise RuntimeError("Kokoro voices file was not found")
+        kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
+        samples, sample_rate = kokoro.create(
+            request["text"],
+            voice=str(request.get("voice_id") or DEFAULT_KOKORO_VOICE),
+            speed=float(request.get("speed") or 1.0),
+            lang=str(request.get("lang") or DEFAULT_KOKORO_LANG),
+        )
+        buffer = io.BytesIO()
+        soundfile.write(buffer, samples, int(sample_rate), format="WAV")
+        audio_bytes = buffer.getvalue()
+        if not audio_bytes:
+            raise RuntimeError("Kokoro TTS returned empty audio.")
+        return audio_bytes, str(request.get("voice_id") or DEFAULT_KOKORO_VOICE)
+
+
+
+    except Exception:
+        return ()
 def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         websocket = importlib.import_module("websocket")
