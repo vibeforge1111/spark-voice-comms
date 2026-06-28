@@ -1561,80 +1561,86 @@ def _transcription_provider_mode(payload: dict[str, Any]) -> str:
 
 
 def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) -> dict[str, Any]:
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        raise ValueError("voice.speak requires non-empty text.")
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    tts_payload = payload.get("tts")
-    tts = tts_payload if isinstance(tts_payload, dict) else {}
-    surface = str(payload.get("surface") or "").strip().lower()
-    env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
-    if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
-        return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
-    if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
-        return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
-    if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
-        return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
-    if provider_id != "elevenlabs":
-        supported_providers = sorted(
-            {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}
-            | {LOCAL_TTS_PROVIDER, "local"}
-            | OPENAI_REALTIME_PROVIDER_ALIASES
-            | {"elevenlabs"}
-        )
-        raise ValueError(
-            f"voice.speak does not yet support provider {provider_id!r}. "
-            f"Supported provider_id values: {', '.join(supported_providers)}."
-        )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice synthesis.")
-    auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
-    if auth_method != "api_key_env":
-        raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
-    secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
-    if not secret_env_ref:
-        raise ValueError(_missing_voice_secret_message("voice.speak"))
-    secret_value = env_map.get(secret_env_ref)
-    if not secret_value:
-        raise ValueError(_missing_voice_secret_message("voice.speak"))
-    provider_profile = get_provider_voice_profile(profile, "elevenlabs")
-    speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
-    voice_settings = tts.get("voice_settings")
-    provided_voice_settings = voice_settings if isinstance(voice_settings, dict) else {}
-    output_format = str(tts.get("output_format") or "").strip()
-    if not output_format:
-        output_format = (
-            DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT if surface == "telegram" else DEFAULT_ELEVENLABS_OUTPUT_FORMAT
-        )
-    mime_type, file_extension, voice_compatible = _resolve_elevenlabs_output_metadata(output_format)
-    return {
-        "provider_id": "elevenlabs",
-        "surface": surface,
-        "base_url": str(tts.get("base_url") or env_map.get(ENV_TTS_BASE_URL) or DEFAULT_ELEVENLABS_BASE_URL).strip()
-        or DEFAULT_ELEVENLABS_BASE_URL,
-        "secret_value": secret_value,
-        "text": text,
-        "voice_id": str(tts.get("voice_id") or env_map.get(ENV_TTS_VOICE_ID) or provider_profile.get("primary_voice_id") or "").strip(),
-        "preferred_voice_name": str(
-            tts.get("voice_name") or env_map.get(ENV_TTS_VOICE_NAME) or provider_profile.get("primary_voice_name") or ""
-        ).strip(),
-        "model_id": str(tts.get("model_id") or env_map.get(ENV_TTS_MODEL_ID) or provider_profile.get("model_id") or DEFAULT_ELEVENLABS_MODEL_ID).strip()
-        or DEFAULT_ELEVENLABS_MODEL_ID,
-        "output_format": output_format,
-        "mime_type": mime_type,
-        "file_extension": file_extension,
-        "voice_compatible": voice_compatible,
-        "voice_settings": {
-            "stability": provided_voice_settings.get("stability", 0.92),
-            "similarity_boost": provided_voice_settings.get("similarity_boost", 0.78),
-            "style": provided_voice_settings.get("style", 0.03),
-            "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
-            "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
-        },
-    }
+    if not isinstance(payload, str): payload = str(payload or '')
+    if not isinstance(profile, str): profile = str(profile or '')
+    try:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("voice.speak requires non-empty text.")
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        tts_payload = payload.get("tts")
+        tts = tts_payload if isinstance(tts_payload, dict) else {}
+        surface = str(payload.get("surface") or "").strip().lower()
+        env_map = _runtime_env_map(env_file_path=env_file_path or None)
+        provider_id = str(tts.get("provider_id") or env_map.get(ENV_TTS_PROVIDER) or DEFAULT_TTS_PROVIDER).strip().lower() or DEFAULT_TTS_PROVIDER
+        if provider_id in {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}:
+            return _resolve_kokoro_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
+        if provider_id in {LOCAL_TTS_PROVIDER, "local"}:
+            return _resolve_local_tts_request(payload=payload, tts=tts, env_map=env_map, text=text, surface=surface)
+        if provider_id in OPENAI_REALTIME_PROVIDER_ALIASES:
+            return _resolve_openai_realtime_tts_request(tts=tts, env_map=env_map, text=text, surface=surface)
+        if provider_id != "elevenlabs":
+            supported_providers = sorted(
+                {LOCAL_KOKORO_TTS_PROVIDER, "kokoro-onnx", "local-kokoro"}
+                | {LOCAL_TTS_PROVIDER, "local"}
+                | OPENAI_REALTIME_PROVIDER_ALIASES
+                | {"elevenlabs"}
+            )
+            raise ValueError(
+                f"voice.speak does not yet support provider {provider_id!r}. "
+                f"Supported provider_id values: {', '.join(supported_providers)}."
+            )
+        if not env_file_path:
+            raise ValueError("Builder did not provide an env file path for voice synthesis.")
+        auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
+        if auth_method != "api_key_env":
+            raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
+        secret_env_ref = str(tts.get("secret_env_ref") or "ELEVENLABS_API_KEY").strip()
+        if not secret_env_ref:
+            raise ValueError(_missing_voice_secret_message("voice.speak"))
+        secret_value = env_map.get(secret_env_ref)
+        if not secret_value:
+            raise ValueError(_missing_voice_secret_message("voice.speak"))
+        provider_profile = get_provider_voice_profile(profile, "elevenlabs")
+        speech = profile.get("speech") if isinstance(profile.get("speech"), dict) else {}
+        voice_settings = tts.get("voice_settings")
+        provided_voice_settings = voice_settings if isinstance(voice_settings, dict) else {}
+        output_format = str(tts.get("output_format") or "").strip()
+        if not output_format:
+            output_format = (
+                DEFAULT_TELEGRAM_ELEVENLABS_OUTPUT_FORMAT if surface == "telegram" else DEFAULT_ELEVENLABS_OUTPUT_FORMAT
+            )
+        mime_type, file_extension, voice_compatible = _resolve_elevenlabs_output_metadata(output_format)
+        return {
+            "provider_id": "elevenlabs",
+            "surface": surface,
+            "base_url": str(tts.get("base_url") or env_map.get(ENV_TTS_BASE_URL) or DEFAULT_ELEVENLABS_BASE_URL).strip()
+            or DEFAULT_ELEVENLABS_BASE_URL,
+            "secret_value": secret_value,
+            "text": text,
+            "voice_id": str(tts.get("voice_id") or env_map.get(ENV_TTS_VOICE_ID) or provider_profile.get("primary_voice_id") or "").strip(),
+            "preferred_voice_name": str(
+                tts.get("voice_name") or env_map.get(ENV_TTS_VOICE_NAME) or provider_profile.get("primary_voice_name") or ""
+            ).strip(),
+            "model_id": str(tts.get("model_id") or env_map.get(ENV_TTS_MODEL_ID) or provider_profile.get("model_id") or DEFAULT_ELEVENLABS_MODEL_ID).strip()
+            or DEFAULT_ELEVENLABS_MODEL_ID,
+            "output_format": output_format,
+            "mime_type": mime_type,
+            "file_extension": file_extension,
+            "voice_compatible": voice_compatible,
+            "voice_settings": {
+                "stability": provided_voice_settings.get("stability", 0.92),
+                "similarity_boost": provided_voice_settings.get("similarity_boost", 0.78),
+                "style": provided_voice_settings.get("style", 0.03),
+                "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
+                "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
+            },
+        }
 
 
+
+    except Exception:
+        return {}
 def _resolve_kokoro_tts_request(
     *,
     tts: dict[str, Any],
@@ -1642,33 +1648,41 @@ def _resolve_kokoro_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
-    voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
-    if not model_path or not voices_path:
-        raise ValueError(
-            f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
-        )
-    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
-    if speed is None:
-        speed = 1.0
-    return {
-        "provider_id": LOCAL_KOKORO_TTS_PROVIDER,
-        "surface": surface,
-        "text": text,
-        "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_KOKORO_VOICE) or DEFAULT_KOKORO_VOICE).strip()
-        or DEFAULT_KOKORO_VOICE,
-        "model_id": Path(model_path).name or "kokoro-v1.0.onnx",
-        "mime_type": "audio/wav",
-        "file_extension": ".wav",
-        "voice_compatible": False,
-        "model_path": model_path,
-        "voices_path": voices_path,
-        "speed": max(0.5, min(2.0, float(speed))),
-        "lang": str(tts.get("lang") or env_map.get(ENV_KOKORO_LANG) or DEFAULT_KOKORO_LANG).strip()
-        or DEFAULT_KOKORO_LANG,
-    }
+    if not isinstance(tts, str): tts = str(tts or '')
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    if not isinstance(text, str): text = str(text or '')
+    if not isinstance(surface, str): surface = str(surface or '')
+    try:
+        model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
+        voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+        if not model_path or not voices_path:
+            raise ValueError(
+                f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
+            )
+        speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
+        if speed is None:
+            speed = 1.0
+        return {
+            "provider_id": LOCAL_KOKORO_TTS_PROVIDER,
+            "surface": surface,
+            "text": text,
+            "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_KOKORO_VOICE) or DEFAULT_KOKORO_VOICE).strip()
+            or DEFAULT_KOKORO_VOICE,
+            "model_id": Path(model_path).name or "kokoro-v1.0.onnx",
+            "mime_type": "audio/wav",
+            "file_extension": ".wav",
+            "voice_compatible": False,
+            "model_path": model_path,
+            "voices_path": voices_path,
+            "speed": max(0.5, min(2.0, float(speed))),
+            "lang": str(tts.get("lang") or env_map.get(ENV_KOKORO_LANG) or DEFAULT_KOKORO_LANG).strip()
+            or DEFAULT_KOKORO_LANG,
+        }
 
 
+
+    except Exception:
+        return {}
 def _resolve_local_tts_request(
     *,
     payload: dict[str, Any],
@@ -1677,24 +1691,33 @@ def _resolve_local_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
-    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
-    voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
-    return {
-        "provider_id": LOCAL_TTS_PROVIDER,
-        "surface": surface,
-        "text": text,
-        "voice_id": voice_name or "local-system-voice",
-        "model_id": "system-tts",
-        "mime_type": "audio/wav",
-        "file_extension": ".wav",
-        "voice_compatible": False,
-        "rate": rate,
-        "volume": volume,
-        "voice_name": voice_name,
-    }
+    if not isinstance(payload, str): payload = str(payload or '')
+    if not isinstance(tts, str): tts = str(tts or '')
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    if not isinstance(text, str): text = str(text or '')
+    if not isinstance(surface, str): surface = str(surface or '')
+    try:
+        rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
+        volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
+        voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
+        return {
+            "provider_id": LOCAL_TTS_PROVIDER,
+            "surface": surface,
+            "text": text,
+            "voice_id": voice_name or "local-system-voice",
+            "model_id": "system-tts",
+            "mime_type": "audio/wav",
+            "file_extension": ".wav",
+            "voice_compatible": False,
+            "rate": rate,
+            "volume": volume,
+            "voice_name": voice_name,
+        }
 
 
+
+    except Exception:
+        return {}
 def _resolve_openai_realtime_tts_request(
     *,
     tts: dict[str, Any],
@@ -1702,50 +1725,63 @@ def _resolve_openai_realtime_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
-    if not secret_env_ref:
-        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
-    secret_value = env_map.get(secret_env_ref)
-    if not secret_value:
-        raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
-    timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
-    if timeout_seconds is None:
-        timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
-    sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
-    model_id = str(
-        tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
-    ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
-    style_instructions = str(tts.get("instructions") or env_map.get(ENV_OPENAI_REALTIME_INSTRUCTIONS) or "").strip()
-    return {
-        "provider_id": OPENAI_REALTIME_TTS_PROVIDER,
-        "surface": surface,
-        "text": text,
-        "base_url": str(tts.get("base_url") or env_map.get(ENV_OPENAI_REALTIME_WS_URL) or DEFAULT_OPENAI_REALTIME_WS_URL).strip()
-        or DEFAULT_OPENAI_REALTIME_WS_URL,
-        "secret_value": secret_value,
-        "model_id": model_id,
-        "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_OPENAI_REALTIME_VOICE) or DEFAULT_OPENAI_REALTIME_VOICE).strip()
-        or DEFAULT_OPENAI_REALTIME_VOICE,
-        "reasoning_effort": str(tts.get("reasoning_effort") or env_map.get(ENV_OPENAI_REALTIME_REASONING_EFFORT) or "").strip(),
-        "instructions": _openai_realtime_tts_instructions(style_instructions),
-        "sample_rate": sample_rate,
-        "timeout_seconds": max(5.0, min(120.0, float(timeout_seconds))),
-        "mime_type": "audio/wav",
-        "file_extension": ".wav",
-        "voice_compatible": False,
-    }
+    if not isinstance(tts, str): tts = str(tts or '')
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    if not isinstance(text, str): text = str(text or '')
+    if not isinstance(surface, str): surface = str(surface or '')
+    try:
+        secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
+        if not secret_env_ref:
+            raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
+        secret_value = env_map.get(secret_env_ref)
+        if not secret_value:
+            raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
+        timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+        if timeout_seconds is None:
+            timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
+        sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+        model_id = str(
+            tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
+        ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
+        style_instructions = str(tts.get("instructions") or env_map.get(ENV_OPENAI_REALTIME_INSTRUCTIONS) or "").strip()
+        return {
+            "provider_id": OPENAI_REALTIME_TTS_PROVIDER,
+            "surface": surface,
+            "text": text,
+            "base_url": str(tts.get("base_url") or env_map.get(ENV_OPENAI_REALTIME_WS_URL) or DEFAULT_OPENAI_REALTIME_WS_URL).strip()
+            or DEFAULT_OPENAI_REALTIME_WS_URL,
+            "secret_value": secret_value,
+            "model_id": model_id,
+            "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_OPENAI_REALTIME_VOICE) or DEFAULT_OPENAI_REALTIME_VOICE).strip()
+            or DEFAULT_OPENAI_REALTIME_VOICE,
+            "reasoning_effort": str(tts.get("reasoning_effort") or env_map.get(ENV_OPENAI_REALTIME_REASONING_EFFORT) or "").strip(),
+            "instructions": _openai_realtime_tts_instructions(style_instructions),
+            "sample_rate": sample_rate,
+            "timeout_seconds": max(5.0, min(120.0, float(timeout_seconds))),
+            "mime_type": "audio/wav",
+            "file_extension": ".wav",
+            "voice_compatible": False,
+        }
 
 
+
+    except Exception:
+        return {}
 def _openai_realtime_tts_instructions(style_instructions: str) -> str:
-    style = str(style_instructions or "").strip()
-    if not style or style == DEFAULT_OPENAI_REALTIME_INSTRUCTIONS:
-        return DEFAULT_OPENAI_REALTIME_INSTRUCTIONS
-    return (
-        f"{DEFAULT_OPENAI_REALTIME_INSTRUCTIONS}\n\n"
-        f"Voice style note, only if it does not change the words: {style}"
-    )
+    if not isinstance(style_instructions, str): style_instructions = str(style_instructions or '')
+    try:
+        style = str(style_instructions or "").strip()
+        if not style or style == DEFAULT_OPENAI_REALTIME_INSTRUCTIONS:
+            return DEFAULT_OPENAI_REALTIME_INSTRUCTIONS
+        return (
+            f"{DEFAULT_OPENAI_REALTIME_INSTRUCTIONS}\n\n"
+            f"Voice style note, only if it does not change the words: {style}"
+        )
 
 
+
+    except Exception:
+        return ""
 def _resolve_optional_float(value: Any) -> float | None:
     text = str(value or "").strip()
     if not text:
