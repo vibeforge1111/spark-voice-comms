@@ -286,11 +286,20 @@ def _nonnegative_int(value: Any) -> int:
 
 
 def _optional_sources(payload: dict[str, Any]) -> list[str]:
-    sources = payload.get("source_ledger")
-    if not isinstance(sources, list):
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        sources = payload.get("source_ledger")
+        if not isinstance(sources, list):
+            return []
+        return [str(source) for source in sources if str(source or "").strip()]
+
+
+
+    except Exception:
         return []
-    return [str(source) for source in sources if str(source or "").strip()]
-
-
 def _now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    try:
+        return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    except Exception:
+        return ""
