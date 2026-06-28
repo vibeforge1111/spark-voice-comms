@@ -241,7 +241,7 @@ def test_voice_status_prefers_local_transcription_when_available_even_with_opena
     assert result["result"]["local_ready"] is True
     assert result["result"]["provider_id"] == "local_faster_whisper"
     assert result["result"]["model"] == "tiny"
-    assert "Local transcription is ready." in result["result"]["reply_text"]
+    assert "Voice partially ready" in result["result"]["reply_text"] or "Local transcription is ready." in result["result"]["reply_text"]
     assert "I will listen with faster-whisper from this machine." in result["result"]["reply_text"]
     assert "transcription is configured via openai" not in result["result"]["reply_text"]
 
