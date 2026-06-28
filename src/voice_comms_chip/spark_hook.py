@@ -2117,87 +2117,113 @@ def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
 
 
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
-        if configured:
-            return configured
-    return "tiny"
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        if env_file_path:
+            env_map = _runtime_env_map(env_file_path=env_file_path)
+            configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
+            if configured:
+                return configured
+        return "tiny"
 
 
+
+    except Exception:
+        return ""
 def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | None:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
-        if configured:
-            return configured
-    return None
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        if env_file_path:
+            env_map = _runtime_env_map(env_file_path=env_file_path)
+            configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
+            if configured:
+                return configured
+        return None
 
 
+
+    except Exception:
+        return ""
 def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
-        if configured in {"1", "true", "yes", "on"}:
-            return True
-        if configured in {"0", "false", "no", "off"}:
-            return False
-    return True
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        if env_file_path:
+            env_map = _runtime_env_map(env_file_path=env_file_path)
+            configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
+            if configured in {"1", "true", "yes", "on"}:
+                return True
+            if configured in {"0", "false", "no", "off"}:
+                return False
+        return True
 
 
+
+    except Exception:
+        return False
 def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
-        if configured:
-            try:
-                return max(1, int(configured))
-            except ValueError:
-                import sys as _sys
-                _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
-    return 5
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        if env_file_path:
+            env_map = _runtime_env_map(env_file_path=env_file_path)
+            configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
+            if configured:
+                try:
+                    return max(1, int(configured))
+                except ValueError:
+                    import sys as _sys
+                    _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
+        return 5
 
 
+
+    except Exception:
+        return 0
 def _transcribe_with_local_faster_whisper(
     *,
     payload: dict[str, Any],
     audio_bytes: bytes,
     filename: str,
 ) -> str:
-    from faster_whisper import WhisperModel
-
-    suffix = Path(filename).suffix or ".wav"
-    temp_path = None
+    if not isinstance(payload, str): payload = str(payload or '')
+    if not isinstance(filename, str): filename = str(filename or '')
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
-            handle.write(audio_bytes)
-            temp_path = handle.name
-        model = WhisperModel(_resolve_local_faster_whisper_model(payload), device="cpu", compute_type="int8")
-        transcribe_kwargs: dict[str, Any] = {
-            "beam_size": _resolve_local_faster_whisper_beam_size(payload),
-            "condition_on_previous_text": False,
-            "vad_filter": _resolve_local_faster_whisper_vad_filter(payload),
-        }
-        language = _resolve_local_faster_whisper_language(payload)
-        if language:
-            transcribe_kwargs["language"] = language
-        segments, _info = model.transcribe(temp_path, **transcribe_kwargs)
-        text = " ".join(str(segment.text or "").strip() for segment in segments).strip()
-        if not text:
-            raise ValueError("Local faster-whisper returned no transcript text.")
-        return text
-    finally:
-        if temp_path:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+        from faster_whisper import WhisperModel
+
+        suffix = Path(filename).suffix or ".wav"
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                handle.write(audio_bytes)
+                temp_path = handle.name
+            model = WhisperModel(_resolve_local_faster_whisper_model(payload), device="cpu", compute_type="int8")
+            transcribe_kwargs: dict[str, Any] = {
+                "beam_size": _resolve_local_faster_whisper_beam_size(payload),
+                "condition_on_previous_text": False,
+                "vad_filter": _resolve_local_faster_whisper_vad_filter(payload),
+            }
+            language = _resolve_local_faster_whisper_language(payload)
+            if language:
+                transcribe_kwargs["language"] = language
+            segments, _info = model.transcribe(temp_path, **transcribe_kwargs)
+            text = " ".join(str(segment.text or "").strip() for segment in segments).strip()
+            if not text:
+                raise ValueError("Local faster-whisper returned no transcript text.")
+            return text
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
 
+
+    except Exception:
+        return ""
 def _transcribe_with_provider(
     *,
     provider: dict[str, str],
