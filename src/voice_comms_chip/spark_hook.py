@@ -1324,118 +1324,144 @@ def _text_fingerprint(text: str) -> str:
 
 
 def _missing_voice_secret_message(context: str) -> str:
-    label = str(context or "Voice provider").strip() or "Voice provider"
-    return (
-        f"{label} is missing a configured API secret. "
-        "Add the required provider key to your builder env file and retry."
-    )
+    if not isinstance(context, str): context = str(context or '')
+    try:
+        label = str(context or "Voice provider").strip() or "Voice provider"
+        return (
+            f"{label} is missing a configured API secret. "
+            "Add the required provider key to your builder env file and retry."
+        )
 
 
+
+    except Exception:
+        return ""
 def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
-    dedicated_provider = _resolve_dedicated_transcription_provider(payload)
-    if dedicated_provider is not None:
-        return dedicated_provider
-    provider_error = str(payload.get("provider_error") or "").strip()
-    if provider_error:
-        raise ValueError(provider_error)
-    provider = payload.get("provider")
-    if not isinstance(provider, dict):
-        raise ValueError("Builder did not provide a voice transcription provider payload.")
-    provider_id = str(provider.get("provider_id") or "").strip()
-    provider_kind = str(provider.get("provider_kind") or "").strip()
-    auth_method = str(provider.get("auth_method") or "").strip()
-    execution_transport = str(provider.get("execution_transport") or "").strip()
-    base_url = str(provider.get("base_url") or "").strip()
-    secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if provider_kind not in SUPPORTED_PROVIDER_KINDS:
-        supported = ", ".join(sorted(SUPPORTED_PROVIDER_KINDS))
-        raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime. Supported provider kinds: {supported}."
-        )
-    if execution_transport and execution_transport != "direct_http":
-        raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
-        )
-    if auth_method != "api_key_env":
-        raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
-        )
-    if not base_url:
-        raise ValueError(
-            f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
-        )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice transcription.")
-    if not secret_env_ref:
-        raise ValueError(
-            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
-        )
-    secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
-    if not secret_value:
-        raise ValueError(
-            _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
-        )
-    return {
-        "provider_id": provider_id,
-        "provider_kind": provider_kind,
-        "base_url": base_url,
-        "secret_value": secret_value,
-    }
-
-
-def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[str, str] | None:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    env_map = _runtime_env_map(env_file_path=env_file_path or None)
-    provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
-    normalized_provider_id = provider_id.replace("_", "-")
-    if normalized_provider_id in {"auto", "default"}:
-        provider_id = ""
-    elif normalized_provider_id in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
-        return None
-    elif normalized_provider_id in {"builder", "provider", "configured-provider"}:
-        return None
-    base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
-    secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()
-    if provider_id or base_url or secret_env_ref:
-        resolved_provider_id = provider_id or "openai"
-        if resolved_provider_id != "openai":
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        dedicated_provider = _resolve_dedicated_transcription_provider(payload)
+        if dedicated_provider is not None:
+            return dedicated_provider
+        provider_error = str(payload.get("provider_error") or "").strip()
+        if provider_error:
+            raise ValueError(provider_error)
+        provider = payload.get("provider")
+        if not isinstance(provider, dict):
+            raise ValueError("Builder did not provide a voice transcription provider payload.")
+        provider_id = str(provider.get("provider_id") or "").strip()
+        provider_kind = str(provider.get("provider_kind") or "").strip()
+        auth_method = str(provider.get("auth_method") or "").strip()
+        execution_transport = str(provider.get("execution_transport") or "").strip()
+        base_url = str(provider.get("base_url") or "").strip()
+        secret_env_ref = str(provider.get("secret_env_ref") or "").strip()
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        if provider_kind not in SUPPORTED_PROVIDER_KINDS:
+            supported = ", ".join(sorted(SUPPORTED_PROVIDER_KINDS))
             raise ValueError(
-                f"VOICE_TRANSCRIBE_PROVIDER {resolved_provider_id!r} is not supported yet. "
-                "Supported values: openai, auto, default, local, offline, faster-whisper, "
-                "local-faster-whisper, builder, provider, configured-provider."
+                f"Active provider '{provider_id or provider_kind or 'unknown'}' does not support direct voice transcription in this runtime. Supported provider kinds: {supported}."
             )
-        resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
-        secret_value = env_map.get(resolved_secret_env_ref)
+        if execution_transport and execution_transport != "direct_http":
+            raise ValueError(
+                f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported execution transport '{execution_transport}'."
+            )
+        if auth_method != "api_key_env":
+            raise ValueError(
+                f"Active provider '{provider_id or provider_kind or 'unknown'}' uses unsupported auth method '{auth_method or 'unknown'}' for voice transcription."
+            )
+        if not base_url:
+            raise ValueError(
+                f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
+            )
+        if not env_file_path:
+            raise ValueError("Builder did not provide an env file path for voice transcription.")
+        if not secret_env_ref:
+            raise ValueError(
+                _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
+            )
+        secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
         if not secret_value:
-            raise ValueError(_missing_voice_secret_message("Voice transcription"))
+            raise ValueError(
+                _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
+            )
         return {
-            "provider_id": "openai",
-            "provider_kind": "openai",
-            "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
-            "secret_value": str(secret_value).strip(),
+            "provider_id": provider_id,
+            "provider_kind": provider_kind,
+            "base_url": base_url,
+            "secret_value": secret_value,
         }
-    openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
-    if openai_key:
-        return {
-            "provider_id": "openai",
-            "provider_kind": "openai",
-            "base_url": DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
-            "secret_value": openai_key,
-        }
-    return None
 
 
+
+    except Exception:
+        return {}
+def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[str, str] | None:
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        env_map = _runtime_env_map(env_file_path=env_file_path or None)
+        provider_id = str(env_map.get("VOICE_TRANSCRIBE_PROVIDER") or "").strip().lower()
+        normalized_provider_id = provider_id.replace("_", "-")
+        if normalized_provider_id in {"auto", "default"}:
+            provider_id = ""
+        elif normalized_provider_id in {"local", "offline", "faster-whisper", "local-faster-whisper"}:
+            return None
+        elif normalized_provider_id in {"builder", "provider", "configured-provider"}:
+            return None
+        base_url = str(env_map.get("VOICE_TRANSCRIBE_BASE_URL") or "").strip()
+        secret_env_ref = str(env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF") or "").strip()
+        if provider_id or base_url or secret_env_ref:
+            resolved_provider_id = provider_id or "openai"
+            if resolved_provider_id != "openai":
+                raise ValueError(
+                    f"VOICE_TRANSCRIBE_PROVIDER {resolved_provider_id!r} is not supported yet. "
+                    "Supported values: openai, auto, default, local, offline, faster-whisper, "
+                    "local-faster-whisper, builder, provider, configured-provider."
+                )
+            resolved_secret_env_ref = secret_env_ref or "OPENAI_API_KEY"
+            secret_value = env_map.get(resolved_secret_env_ref)
+            if not secret_value:
+                raise ValueError(_missing_voice_secret_message("Voice transcription"))
+            return {
+                "provider_id": "openai",
+                "provider_kind": "openai",
+                "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+                "secret_value": str(secret_value).strip(),
+            }
+        openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
+        if openai_key:
+            return {
+                "provider_id": "openai",
+                "provider_kind": "openai",
+                "base_url": DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+                "secret_value": openai_key,
+            }
+        return None
+
+
+
+    except Exception:
+        return {}
 def _read_env_value(*, env_file_path: str, key: str) -> str | None:
-    return _runtime_env_map(env_file_path=env_file_path).get(key)
+    if not isinstance(env_file_path, str): env_file_path = str(env_file_path or '')
+    if not isinstance(key, str): key = str(key or '')
+    try:
+        return _runtime_env_map(env_file_path=env_file_path).get(key)
 
 
+
+    except Exception:
+        return ""
 def _strip_surrounding_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-    return value
+    if not isinstance(value, str): value = str(value or '')
+    try:
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            return value[1:-1]
+        return value
 
 
+
+    except Exception:
+        return ""
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
     if not path.exists():
