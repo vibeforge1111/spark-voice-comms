@@ -359,8 +359,8 @@ def test_voice_onboard_reads_kokoro_from_process_env_when_builder_env_lacks_voic
         "os.environ",
         {
             "VOICE_TTS_PROVIDER": "kokoro",
-            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
-            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
+            "VOICE_TTS_KOKORO_MODEL_PATH": "kokoro-v1.0.onnx",
+            "VOICE_TTS_KOKORO_VOICES_PATH": "voices-v1.0.bin",
         },
         clear=False,
     ), patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
@@ -452,8 +452,8 @@ def test_voice_install_kokoro_sees_model_assets_from_process_env(tmp_path):
     with patch.dict(
         "os.environ",
         {
-            "VOICE_TTS_KOKORO_MODEL_PATH": str(model_path),
-            "VOICE_TTS_KOKORO_VOICES_PATH": str(voices_path),
+            "VOICE_TTS_KOKORO_MODEL_PATH": "kokoro-v1.0.onnx",
+            "VOICE_TTS_KOKORO_VOICES_PATH": "voices-v1.0.bin",
         },
         clear=False,
     ), patch("voice_comms_chip.spark_hook._kokoro_python_unsupported_message", return_value=None), patch(
@@ -1336,8 +1336,8 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
                 "text": "Kokoro local voice.",
                 "tts": {
                     "provider_id": "kokoro",
-                    "model_path": str(model_path),
-                    "voices_path": str(voices_path),
+                    "model_path": "kokoro-v1.0.onnx",
+                    "voices_path": "voices-v1.0.bin",
                     "voice": "af_sarah",
                     "speed": 1.1,
                     "lang": "en-us",
@@ -1350,8 +1350,8 @@ def test_voice_speak_supports_local_kokoro_tts(tmp_path):
     assert result["result"]["mime_type"] == "audio/wav"
     assert result["result"]["voice_compatible"] is False
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"fake-kokoro-wav"
-    assert captured["model_path"] == str(model_path)
-    assert captured["voices_path"] == str(voices_path)
+    assert captured["model_path"] == "kokoro-v1.0.onnx"
+    assert captured["voices_path"] == "voices-v1.0.bin"
     assert captured["create"] == {"text": "Kokoro local voice.", "voice": "af_sarah", "speed": 1.1, "lang": "en-us"}
     assert captured["write"] == {"samples": [0.0, 0.1, -0.1], "sample_rate": 24000, "format": "WAV"}
 
@@ -1401,8 +1401,8 @@ def test_voice_speak_uses_env_default_tts_provider_for_kokoro(tmp_path):
     assert result["returncode"] == 0
     assert result["result"]["provider_id"] == "kokoro"
     assert base64.b64decode(result["result"]["audio_base64"].encode("ascii")) == b"env-kokoro-wav"
-    assert captured["model_path"] == str(model_path)
-    assert captured["voices_path"] == str(voices_path)
+    assert captured["model_path"] == "kokoro-v1.0.onnx"
+    assert captured["voices_path"] == "voices-v1.0.bin"
 
 
 def test_voice_speak_supports_openai_gpt_realtime_2(tmp_path):
