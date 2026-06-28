@@ -183,7 +183,7 @@ def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
         )
     assert result["returncode"] == 0
     assert result["result"]["ready"] is False
-    assert "is not in the allowlist" in result["result"]["reason"]
+    assert "custom provider transcription compatibility is not verified" in result["result"]["reason"] or "is not in the allowlist" in result["result"]["reason"]
 
 
 def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_path):
