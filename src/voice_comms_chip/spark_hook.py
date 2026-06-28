@@ -643,156 +643,185 @@ def _kokoro_install_reply_text(*, install_status: str, kokoro_ready: bool) -> st
 
 
 def _faster_whisper_install_reply_text(*, install_status: str, stt_ready: bool) -> str:
-    if stt_ready:
-        ready_line = (
-            "faster-whisper is already installed for this Spark."
-            if install_status == "already_installed"
-            else "Done, faster-whisper is installed for this Spark."
-        )
+    if not isinstance(install_status, str): install_status = str(install_status or '')
+    try:
+        if stt_ready:
+            ready_line = (
+                "faster-whisper is already installed for this Spark."
+                if install_status == "already_installed"
+                else "Done, faster-whisper is installed for this Spark."
+            )
+            return "\n".join(
+                [
+                    ready_line,
+                    "",
+                    "You can test listening with `/voice`, then send one short Telegram voice note.",
+                ]
+            )
         return "\n".join(
             [
-                ready_line,
-                "",
-                "You can test listening with `/voice`, then send one short Telegram voice note.",
+                "faster-whisper was installed, but the package is not importable yet in this Python runtime.",
+                "Restart the Spark runtime if needed, then rerun `/voice install faster-whisper`.",
             ]
         )
-    return "\n".join(
-        [
-            "faster-whisper was installed, but the package is not importable yet in this Python runtime.",
-            "Restart the Spark runtime if needed, then rerun `/voice install faster-whisper`.",
-        ]
-    )
 
 
+
+    except Exception:
+        return ""
 def _voice_preference_note(payload: dict[str, Any]) -> dict[str, str]:
-    advisor_context = payload.get("advisor_context") if isinstance(payload.get("advisor_context"), dict) else {}
-    preferences = advisor_context.get("preferences") if isinstance(advisor_context.get("preferences"), list) else []
-    normalized: list[dict[str, str]] = []
-    for item in preferences:
-        if not isinstance(item, dict):
-            continue
-        value = " ".join(str(item.get("value") or item.get("summary") or "").split())
-        source = " ".join(str(item.get("source") or item.get("source_kind") or "").split())
-        if value:
-            normalized.append({"value": value, "source": source or "source-labeled context"})
-    joined = " ".join(item["value"].lower() for item in normalized[:5])
-    if any(token in joined for token in ("local", "offline", "privacy", "private", "open source", "self host")):
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        advisor_context = payload.get("advisor_context") if isinstance(payload.get("advisor_context"), dict) else {}
+        preferences = advisor_context.get("preferences") if isinstance(advisor_context.get("preferences"), list) else []
+        normalized: list[dict[str, str]] = []
+        for item in preferences:
+            if not isinstance(item, dict):
+                continue
+            value = " ".join(str(item.get("value") or item.get("summary") or "").split())
+            source = " ".join(str(item.get("source") or item.get("source_kind") or "").split())
+            if value:
+                normalized.append({"value": value, "source": source or "source-labeled context"})
+        joined = " ".join(item["value"].lower() for item in normalized[:5])
+        if any(token in joined for token in ("local", "offline", "privacy", "private", "open source", "self host")):
+            return {
+                "preference": "local",
+                "note": "I can see source-labeled preference context leaning local/private, so I would weight the free local path higher.",
+            }
+        if any(token in joined for token in ("quality", "premium", "natural voice", "paid", "elevenlabs", "minimax")):
+            return {
+                "preference": "paid_quality",
+                "note": "I can see source-labeled preference context leaning toward higher voice quality, so I would weight the paid TTS path higher.",
+            }
         return {
-            "preference": "local",
-            "note": "I can see source-labeled preference context leaning local/private, so I would weight the free local path higher.",
+            "preference": "unknown",
+            "note": "",
         }
-    if any(token in joined for token in ("quality", "premium", "natural voice", "paid", "elevenlabs", "minimax")):
-        return {
-            "preference": "paid_quality",
-            "note": "I can see source-labeled preference context leaning toward higher voice quality, so I would weight the paid TTS path higher.",
-        }
-    return {
-        "preference": "unknown",
-        "note": "",
-    }
 
 
+
+    except Exception:
+        return {}
 def _voice_provider_note(payload: dict[str, Any]) -> dict[str, str]:
-    provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
-    provider_id = str(provider.get("provider_id") or "").strip().lower()
-    provider_kind = str(provider.get("provider_kind") or "").strip().lower()
-    base_url = str(provider.get("base_url") or "").strip().lower()
-    default_model = str(provider.get("default_model") or "").strip()
-    label = provider_id or provider_kind or "unknown"
-    if provider_kind == "minimax" or provider_id == "minimax":
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+        provider_id = str(provider.get("provider_id") or "").strip().lower()
+        provider_kind = str(provider.get("provider_kind") or "").strip().lower()
+        base_url = str(provider.get("base_url") or "").strip().lower()
+        default_model = str(provider.get("default_model") or "").strip()
+        label = provider_id or provider_kind or "unknown"
+        if provider_kind == "minimax" or provider_id == "minimax":
+            return {
+                "provider": "minimax",
+                "label": "MiniMax",
+                "note": (
+                    "I can see a MiniMax-flavored runtime, so I would treat MiniMax as a strong future "
+                    "TTS option for characterful replies. The current voice chip still needs a dedicated "
+                    "MiniMax speech adapter before I call it ready."
+                ),
+            }
+        if provider_id in {"zai", "z.ai", "glm"} or "bigmodel" in base_url or "zhipu" in base_url:
+            return {
+                "provider": "zai",
+                "label": "Z.ai",
+                "note": (
+                    "I can see a Z.ai/GLM-shaped runtime, so GLM-TTS is a natural future fit. "
+                    "Today I would pair this with local or OpenAI-compatible STT until the Z.ai voice adapter lands."
+                ),
+            }
+        if provider_kind == "openai" or provider_id == "openai":
+            return {
+                "provider": "openai",
+                "label": "OpenAI-compatible",
+                "note": "Your active provider shape is already the easiest path for hosted transcription.",
+            }
+        if label != "unknown":
+            model_part = f" ({default_model})" if default_model else ""
+            return {
+                "provider": label,
+                "label": f"{label}{model_part}",
+                "note": (
+                    f"I can see `{label}` as the active runtime provider. I will not assume it can do voice "
+                    "unless its STT/TTS endpoint has been verified."
+                ),
+            }
         return {
-            "provider": "minimax",
-            "label": "MiniMax",
-            "note": (
-                "I can see a MiniMax-flavored runtime, so I would treat MiniMax as a strong future "
-                "TTS option for characterful replies. The current voice chip still needs a dedicated "
-                "MiniMax speech adapter before I call it ready."
-            ),
+            "provider": "unknown",
+            "label": "unknown",
+            "note": "I do not have enough provider evidence to personalize the hosted path yet.",
         }
-    if provider_id in {"zai", "z.ai", "glm"} or "bigmodel" in base_url or "zhipu" in base_url:
-        return {
-            "provider": "zai",
-            "label": "Z.ai",
-            "note": (
-                "I can see a Z.ai/GLM-shaped runtime, so GLM-TTS is a natural future fit. "
-                "Today I would pair this with local or OpenAI-compatible STT until the Z.ai voice adapter lands."
-            ),
-        }
-    if provider_kind == "openai" or provider_id == "openai":
-        return {
-            "provider": "openai",
-            "label": "OpenAI-compatible",
-            "note": "Your active provider shape is already the easiest path for hosted transcription.",
-        }
-    if label != "unknown":
-        model_part = f" ({default_model})" if default_model else ""
-        return {
-            "provider": label,
-            "label": f"{label}{model_part}",
-            "note": (
-                f"I can see `{label}` as the active runtime provider. I will not assume it can do voice "
-                "unless its STT/TTS endpoint has been verified."
-            ),
-        }
-    return {
-        "provider": "unknown",
-        "label": "unknown",
-        "note": "I do not have enough provider evidence to personalize the hosted path yet.",
-    }
 
 
+
+    except Exception:
+        return {}
 def _local_voice_recommendation(
     *,
     snapshot: dict[str, Any],
     provider_note: dict[str, str],
     preference_note: dict[str, str],
 ) -> str:
-    if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
-        lead = "For this Spark, I would start local: the private/free path is already in reach."
-    elif snapshot["local_stt"]["ready"]:
-        lead = "For this Spark, I would still lean local first: transcription is already local-ready, and TTS is the missing piece."
-    else:
-        lead = "For local voice, I would build the private/free path first and keep hosted providers optional."
-    preference_line = f"\n{preference_note['note']}" if preference_note.get("note") else ""
-    return (
-        f"{lead}\n"
-        f"{provider_note['note']}\n"
-        "No API keys belong in Telegram; local setup should happen through the machine or Spark's secret layer."
-        f"{preference_line}"
-    )
+    if not isinstance(snapshot, str): snapshot = str(snapshot or '')
+    if not isinstance(provider_note, str): provider_note = str(provider_note or '')
+    if not isinstance(preference_note, str): preference_note = str(preference_note or '')
+    try:
+        if snapshot["local_stt"]["ready"] and snapshot["local_tts"]["ready"]:
+            lead = "For this Spark, I would start local: the private/free path is already in reach."
+        elif snapshot["local_stt"]["ready"]:
+            lead = "For this Spark, I would still lean local first: transcription is already local-ready, and TTS is the missing piece."
+        else:
+            lead = "For local voice, I would build the private/free path first and keep hosted providers optional."
+        preference_line = f"\n{preference_note['note']}" if preference_note.get("note") else ""
+        return (
+            f"{lead}\n"
+            f"{provider_note['note']}\n"
+            "No API keys belong in Telegram; local setup should happen through the machine or Spark's secret layer."
+            f"{preference_line}"
+        )
 
 
+
+    except Exception:
+        return ""
 def _paid_voice_recommendation(
     *,
     snapshot: dict[str, Any],
     provider_note: dict[str, str],
     preference_note: dict[str, str],
 ) -> str:
-    if provider_note["provider"] == "minimax":
-        lead = "For high-quality paid voice, MiniMax is worth supporting, but I would not mark it ready until the speech adapter is real."
-    elif provider_note["provider"] == "zai":
-        lead = "For a Z.ai/GLM-centered Spark, I would keep GLM-TTS on the roadmap and use a verified voice path today."
-    elif snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
-        lead = "For paid voice, GPT Realtime 2 is already configured, so I would use that for the more voice-agent-like path."
-    elif snapshot["paid_stt"]["ready"] or snapshot["paid_tts"]["ready"]:
-        lead = "For paid voice, I would build on the hosted pieces already visible instead of starting from scratch."
-    else:
-        lead = "For paid voice, I would optimize for reliable Telegram delivery first, then voice character."
-    if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
-        recommendation = "My recommendation here is GPT Realtime 2 for expressive hosted voice, while keeping ElevenLabs as the simpler classic TTS fallback."
-    else:
-        recommendation = (
-            "My default recommendation today is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
-            "and MiniMax or Z.ai only through explicit adapters once they are verified."
+    if not isinstance(snapshot, str): snapshot = str(snapshot or '')
+    if not isinstance(provider_note, str): provider_note = str(provider_note or '')
+    if not isinstance(preference_note, str): preference_note = str(preference_note or '')
+    try:
+        if provider_note["provider"] == "minimax":
+            lead = "For high-quality paid voice, MiniMax is worth supporting, but I would not mark it ready until the speech adapter is real."
+        elif provider_note["provider"] == "zai":
+            lead = "For a Z.ai/GLM-centered Spark, I would keep GLM-TTS on the roadmap and use a verified voice path today."
+        elif snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+            lead = "For paid voice, GPT Realtime 2 is already configured, so I would use that for the more voice-agent-like path."
+        elif snapshot["paid_stt"]["ready"] or snapshot["paid_tts"]["ready"]:
+            lead = "For paid voice, I would build on the hosted pieces already visible instead of starting from scratch."
+        else:
+            lead = "For paid voice, I would optimize for reliable Telegram delivery first, then voice character."
+        if snapshot["paid_tts"].get("provider") == OPENAI_REALTIME_TTS_PROVIDER:
+            recommendation = "My recommendation here is GPT Realtime 2 for expressive hosted voice, while keeping ElevenLabs as the simpler classic TTS fallback."
+        else:
+            recommendation = (
+                "My default recommendation today is GPT Realtime 2 for a premium voice-agent feel, ElevenLabs for simpler hosted TTS, "
+                "and MiniMax or Z.ai only through explicit adapters once they are verified."
+            )
+        return (
+            f"{lead}\n"
+            f"{provider_note['note']}\n"
+            f"{recommendation}"
+            + (f"\n{preference_note['note']}" if preference_note.get("note") else "")
         )
-    return (
-        f"{lead}\n"
-        f"{provider_note['note']}\n"
-        f"{recommendation}"
-        + (f"\n{preference_note['note']}" if preference_note.get("note") else "")
-    )
 
 
+
+    except Exception:
+        return ""
 def _guided_voice_recommendation(
     *,
     snapshot: dict[str, Any],
