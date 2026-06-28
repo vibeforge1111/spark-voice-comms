@@ -180,75 +180,101 @@ def _normalize_stt(stt: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
-    voice_id = _optional_string(tts.get("voice_id"))
-    settings = tts.get("settings") if isinstance(tts.get("settings"), dict) else {}
-    return {
-        "provider_id": str(tts.get("provider_id") or "none"),
-        "mode": str(tts.get("mode") or "unknown"),
-        "ready": bool(tts.get("ready")),
-        "voice_name": _optional_string(tts.get("voice_name")),
-        "voice_id_masked": mask_identifier(voice_id),
-        "voice_id_fingerprint": fingerprint(voice_id),
-        "model_id": _optional_string(tts.get("model_id")),
-        "mime_type": _optional_string(tts.get("mime_type")),
-        "voice_compatible": bool(tts.get("voice_compatible")),
-        "audio_bytes": int(tts.get("audio_bytes") or 0),
-        "settings_fingerprint": fingerprint(settings),
-        "last_probe_ref": _optional_string(tts.get("last_probe_ref")),
-        "claim_boundary": str(tts.get("claim_boundary") or "Synthesis readiness is not Telegram delivery proof."),
-    }
+    if not isinstance(tts, str): tts = str(tts or '')
+    try:
+        voice_id = _optional_string(tts.get("voice_id"))
+        settings = tts.get("settings") if isinstance(tts.get("settings"), dict) else {}
+        return {
+            "provider_id": str(tts.get("provider_id") or "none"),
+            "mode": str(tts.get("mode") or "unknown"),
+            "ready": bool(tts.get("ready")),
+            "voice_name": _optional_string(tts.get("voice_name")),
+            "voice_id_masked": mask_identifier(voice_id),
+            "voice_id_fingerprint": fingerprint(voice_id),
+            "model_id": _optional_string(tts.get("model_id")),
+            "mime_type": _optional_string(tts.get("mime_type")),
+            "voice_compatible": bool(tts.get("voice_compatible")),
+            "audio_bytes": int(tts.get("audio_bytes") or 0),
+            "settings_fingerprint": fingerprint(settings),
+            "last_probe_ref": _optional_string(tts.get("last_probe_ref")),
+            "claim_boundary": str(tts.get("claim_boundary") or "Synthesis readiness is not Telegram delivery proof."),
+        }
 
 
+
+    except Exception:
+        return {}
 def _normalize_telegram_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
-    status = str(delivery.get("last_send_voice_status") or delivery.get("status") or "unknown")
-    return {
-        "ready": bool(delivery.get("ready") or status == "success"),
-        "last_send_voice_at": _optional_string(delivery.get("last_send_voice_at")),
-        "last_send_voice_status": status,
-        "last_failure_reason": _safe_reason(delivery.get("last_failure_reason") or delivery.get("failure_reason")),
-        "telegram_message_id_present": bool(delivery.get("telegram_message_id")),
-    }
+    if not isinstance(delivery, str): delivery = str(delivery or '')
+    try:
+        status = str(delivery.get("last_send_voice_status") or delivery.get("status") or "unknown")
+        return {
+            "ready": bool(delivery.get("ready") or status == "success"),
+            "last_send_voice_at": _optional_string(delivery.get("last_send_voice_at")),
+            "last_send_voice_status": status,
+            "last_failure_reason": _safe_reason(delivery.get("last_failure_reason") or delivery.get("failure_reason")),
+            "telegram_message_id_present": bool(delivery.get("telegram_message_id")),
+        }
 
 
+
+    except Exception:
+        return {}
 def _normalize_latency(latency: dict[str, Any]) -> dict[str, int]:
-    keys = [
-        "download_audio_ms",
-        "transcribe_ms",
-        "builder_answer_ms",
-        "prepare_spoken_text_ms",
-        "synthesize_ms",
-        "convert_audio_ms",
-        "send_voice_ms",
-        "total_ms",
-    ]
-    return {key: _nonnegative_int(latency.get(key)) for key in keys}
+    if not isinstance(latency, str): latency = str(latency or '')
+    try:
+        keys = [
+            "download_audio_ms",
+            "transcribe_ms",
+            "builder_answer_ms",
+            "prepare_spoken_text_ms",
+            "synthesize_ms",
+            "convert_audio_ms",
+            "send_voice_ms",
+            "total_ms",
+        ]
+        return {key: _nonnegative_int(latency.get(key)) for key in keys}
 
 
+
+    except Exception:
+        return {}
 def _claim_levels(
     *,
     stt: dict[str, Any],
     tts: dict[str, Any],
     delivery: dict[str, Any],
 ) -> dict[str, bool]:
-    configured = stt["provider_id"] != "none" or tts["provider_id"] != "none"
-    synthesis_ready = bool(tts["ready"])
-    delivery_ready = bool(delivery["ready"])
-    conversation_ready = bool(stt["ready"] and synthesis_ready and delivery_ready)
-    return {
-        "configured": configured,
-        "synthesis_ready": synthesis_ready,
-        "delivery_ready": delivery_ready,
-        "conversation_ready": conversation_ready,
-    }
+    if not isinstance(stt, str): stt = str(stt or '')
+    if not isinstance(tts, str): tts = str(tts or '')
+    if not isinstance(delivery, str): delivery = str(delivery or '')
+    try:
+        configured = stt["provider_id"] != "none" or tts["provider_id"] != "none"
+        synthesis_ready = bool(tts["ready"])
+        delivery_ready = bool(delivery["ready"])
+        conversation_ready = bool(stt["ready"] and synthesis_ready and delivery_ready)
+        return {
+            "configured": configured,
+            "synthesis_ready": synthesis_ready,
+            "delivery_ready": delivery_ready,
+            "conversation_ready": conversation_ready,
+        }
 
 
+
+    except Exception:
+        return {}
 def fingerprint(value: Any) -> str:
-    if value in (None, "", {}, []):
+    try:
+        if value in (None, "", {}, []):
+            return ""
+        encoded = json_safe(value).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:12]
+
+
+
+    except Exception:
         return ""
-    encoded = json_safe(value).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:12]
-
-
 def mask_identifier(value: str | None) -> str:
     text = str(value or "").strip()
     if not text:
