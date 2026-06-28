@@ -1027,88 +1027,106 @@ def _decode_transcribe_audio_base64(audio_base64: str) -> bytes:
 
 
 def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    env_map = _process_voice_env_map()
-    if env_file_path:
-        try:
-            env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except (OSError, ValueError):
-            pass
-    transcription_mode = _transcription_provider_mode(payload)
-    local_stt_ready = _local_faster_whisper_available()
-    local_tts_status = _local_tts_status(env_map=env_map)
-    active_tts_status = _active_tts_status(env_map=env_map, local_tts_status=local_tts_status)
-    if transcription_mode in {"auto", "local"} and not local_stt_ready:
-        return {
-            "ready": False,
-            "local_ready": False,
-            "local_tts_ready": bool(local_tts_status["ready"]),
-            "local_tts_provider": str(local_tts_status["provider"]),
-            "tts_ready": bool(active_tts_status["ready"]),
-            "tts_provider_id": str(active_tts_status["provider"]),
-            "tts_status": str(active_tts_status["status"]),
-            "speech_reply_status": str(local_tts_status["status"]),
-            "reason": (
-                "local faster-whisper transcription is the default Telegram voice path, "
-                "but `faster_whisper` is not installed"
-            ),
-            "provider_id": "local_faster_whisper",
-            "provider_kind": "local",
-            "model": _resolve_local_faster_whisper_model(payload),
-        }
-    if local_stt_ready and transcription_mode in {"auto", "local"}:
-        provider_note = (
-            "Hosted transcription is configured, but the default Telegram path will stay on local faster-whisper. "
-            "Set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted STT."
-        )
-        provider_id = None
-        provider_kind = None
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        env_map = _process_voice_env_map()
+        if env_file_path:
+            try:
+                env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
+            except (OSError, ValueError):
+                pass
+        transcription_mode = _transcription_provider_mode(payload)
+        local_stt_ready = _local_faster_whisper_available()
+        local_tts_status = _local_tts_status(env_map=env_map)
+        active_tts_status = _active_tts_status(env_map=env_map, local_tts_status=local_tts_status)
+        if transcription_mode in {"auto", "local"} and not local_stt_ready:
+            return {
+                "ready": False,
+                "local_ready": False,
+                "local_tts_ready": bool(local_tts_status["ready"]),
+                "local_tts_provider": str(local_tts_status["provider"]),
+                "tts_ready": bool(active_tts_status["ready"]),
+                "tts_provider_id": str(active_tts_status["provider"]),
+                "tts_status": str(active_tts_status["status"]),
+                "speech_reply_status": str(local_tts_status["status"]),
+                "reason": (
+                    "local faster-whisper transcription is the default Telegram voice path, "
+                    "but `faster_whisper` is not installed"
+                ),
+                "provider_id": "local_faster_whisper",
+                "provider_kind": "local",
+                "model": _resolve_local_faster_whisper_model(payload),
+            }
+        if local_stt_ready and transcription_mode in {"auto", "local"}:
+            provider_note = (
+                "Hosted transcription is configured, but the default Telegram path will stay on local faster-whisper. "
+                "Set VOICE_TRANSCRIBE_PROVIDER=openai to opt into hosted STT."
+            )
+            provider_id = None
+            provider_kind = None
+            try:
+                provider = _resolve_provider(payload)
+                provider_id = provider["provider_id"]
+                provider_kind = provider["provider_kind"]
+                if provider["provider_kind"] == "custom":
+                    provider_note = (
+                        "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
+                    )
+            except ValueError as exc:
+                provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
+            return {
+                "ready": True,
+                "local_ready": True,
+                "local_tts_ready": bool(local_tts_status["ready"]),
+                "local_tts_provider": str(local_tts_status["provider"]),
+                "tts_ready": bool(active_tts_status["ready"]),
+                "tts_provider_id": str(active_tts_status["provider"]),
+                "tts_status": str(active_tts_status["status"]),
+                "speech_reply_status": str(local_tts_status["status"]),
+                "reason": f"local transcription is configured via faster-whisper using model {_resolve_local_faster_whisper_model(payload)}",
+                "provider_note": provider_note,
+                "provider_id": "local_faster_whisper",
+                "provider_kind": "local",
+                "hosted_provider_id": provider_id,
+                "hosted_provider_kind": provider_kind,
+                "model": _resolve_local_faster_whisper_model(payload),
+            }
         try:
             provider = _resolve_provider(payload)
-            provider_id = provider["provider_id"]
-            provider_kind = provider["provider_kind"]
-            if provider["provider_kind"] == "custom":
-                provider_note = (
-                    "Custom provider transcription compatibility is not verified yet, so local faster-whisper will be used."
-                )
         except ValueError as exc:
-            provider_note = f"Hosted transcription provider is not configured; local faster-whisper will be used. Detail: {exc}"
+            return {
+                "ready": False,
+                "local_ready": False,
+                "local_tts_ready": bool(local_tts_status["ready"]),
+                "local_tts_provider": str(local_tts_status["provider"]),
+                "tts_ready": bool(active_tts_status["ready"]),
+                "tts_provider_id": str(active_tts_status["provider"]),
+                "tts_status": str(active_tts_status["status"]),
+                "reason": str(exc),
+                "provider_id": None,
+                "provider_kind": None,
+                "model": None,
+            }
+        if provider["provider_kind"] == "custom":
+            return {
+                "ready": False,
+                "local_ready": False,
+                "local_tts_ready": bool(local_tts_status["ready"]),
+                "local_tts_provider": str(local_tts_status["provider"]),
+                "tts_ready": bool(active_tts_status["ready"]),
+                "tts_provider_id": str(active_tts_status["provider"]),
+                "tts_status": str(active_tts_status["status"]),
+                "reason": (
+                    "custom provider transcription compatibility is not verified yet. "
+                    "This chip expects an OpenAI-compatible `/audio/transcriptions` endpoint."
+                ),
+                "provider_id": provider["provider_id"],
+                "provider_kind": provider["provider_kind"],
+                "model": DEFAULT_TRANSCRIPTION_MODEL,
+            }
         return {
             "ready": True,
-            "local_ready": True,
-            "local_tts_ready": bool(local_tts_status["ready"]),
-            "local_tts_provider": str(local_tts_status["provider"]),
-            "tts_ready": bool(active_tts_status["ready"]),
-            "tts_provider_id": str(active_tts_status["provider"]),
-            "tts_status": str(active_tts_status["status"]),
-            "speech_reply_status": str(local_tts_status["status"]),
-            "reason": f"local transcription is configured via faster-whisper using model {_resolve_local_faster_whisper_model(payload)}",
-            "provider_note": provider_note,
-            "provider_id": "local_faster_whisper",
-            "provider_kind": "local",
-            "hosted_provider_id": provider_id,
-            "hosted_provider_kind": provider_kind,
-            "model": _resolve_local_faster_whisper_model(payload),
-        }
-    try:
-        provider = _resolve_provider(payload)
-    except ValueError as exc:
-        return {
-            "ready": False,
-            "local_ready": False,
-            "local_tts_ready": bool(local_tts_status["ready"]),
-            "local_tts_provider": str(local_tts_status["provider"]),
-            "tts_ready": bool(active_tts_status["ready"]),
-            "tts_provider_id": str(active_tts_status["provider"]),
-            "tts_status": str(active_tts_status["status"]),
-            "reason": str(exc),
-            "provider_id": None,
-            "provider_kind": None,
-            "model": None,
-        }
-    if provider["provider_kind"] == "custom":
-        return {
-            "ready": False,
             "local_ready": False,
             "local_tts_ready": bool(local_tts_status["ready"]),
             "local_tts_provider": str(local_tts_status["provider"]),
@@ -1116,138 +1134,146 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
             "tts_provider_id": str(active_tts_status["provider"]),
             "tts_status": str(active_tts_status["status"]),
             "reason": (
-                "custom provider transcription compatibility is not verified yet. "
-                "This chip expects an OpenAI-compatible `/audio/transcriptions` endpoint."
+                f"transcription is configured via {provider['provider_id']} "
+                f"using model {DEFAULT_TRANSCRIPTION_MODEL}"
+                + (" with local faster-whisper fallback available" if _local_faster_whisper_available() else "")
             ),
             "provider_id": provider["provider_id"],
             "provider_kind": provider["provider_kind"],
             "model": DEFAULT_TRANSCRIPTION_MODEL,
         }
-    return {
-        "ready": True,
-        "local_ready": False,
-        "local_tts_ready": bool(local_tts_status["ready"]),
-        "local_tts_provider": str(local_tts_status["provider"]),
-        "tts_ready": bool(active_tts_status["ready"]),
-        "tts_provider_id": str(active_tts_status["provider"]),
-        "tts_status": str(active_tts_status["status"]),
-        "reason": (
-            f"transcription is configured via {provider['provider_id']} "
-            f"using model {DEFAULT_TRANSCRIPTION_MODEL}"
-            + (" with local faster-whisper fallback available" if _local_faster_whisper_available() else "")
-        ),
-        "provider_id": provider["provider_id"],
-        "provider_kind": provider["provider_kind"],
-        "model": DEFAULT_TRANSCRIPTION_MODEL,
-    }
 
 
+
+    except Exception:
+        return {}
 def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
-    env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    env_map: dict[str, str] = _process_voice_env_map()
-    env_note = "no Builder env file provided"
-    if env_file_path:
-        try:
-            env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-            env_note = "Builder env file read"
-        except Exception as exc:
-            env_note = f"Builder env file unavailable: {exc}"
-    local_stt_ready = _local_faster_whisper_available()
-    local_tts_status = _local_tts_status(env_map=env_map)
-    local_tts_ready = local_tts_status["ready"]
-    paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
-    paid_tts_status = _paid_tts_status(env_map=env_map)
-    paid_tts_ready = paid_tts_status["ready"]
-    return {
-        "env": {"status": env_note, "provided": bool(env_file_path)},
-        "local_stt": {
-            "ready": local_stt_ready,
-            "status": "ready via faster-whisper" if local_stt_ready else "install optional `faster-whisper` for offline STT",
-            "cost": "free/local",
-        },
-        "local_tts": {
-            "ready": local_tts_ready,
-            "status": local_tts_status["status"],
-            "provider": local_tts_status["provider"],
-            "cost": "free/local",
-        },
-        "paid_stt": {
-            "ready": paid_stt_ready,
-            "status": "configured for OpenAI-compatible STT" if paid_stt_ready else "add OpenAI-compatible STT env refs",
-            "cost": "provider usage",
-        },
-        "paid_tts": {
-            "ready": paid_tts_ready,
-            "status": paid_tts_status["status"],
-            "provider": paid_tts_status["provider"],
-            "cost": "provider usage",
-        },
-    }
-
-
-def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
-    if _local_kokoro_ready(env_map=env_map):
+    if not isinstance(payload, str): payload = str(payload or '')
+    try:
+        env_file_path = str(payload.get("builder_env_file_path") or "").strip()
+        env_map: dict[str, str] = _process_voice_env_map()
+        env_note = "no Builder env file provided"
+        if env_file_path:
+            try:
+                env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
+                env_note = "Builder env file read"
+            except Exception as exc:
+                env_note = f"Builder env file unavailable: {exc}"
+        local_stt_ready = _local_faster_whisper_available()
+        local_tts_status = _local_tts_status(env_map=env_map)
+        local_tts_ready = local_tts_status["ready"]
+        paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
+        paid_tts_status = _paid_tts_status(env_map=env_map)
+        paid_tts_ready = paid_tts_status["ready"]
         return {
-            "ready": True,
-            "provider": LOCAL_KOKORO_TTS_PROVIDER,
-            "status": "ready via Kokoro local neural TTS",
+            "env": {"status": env_note, "provided": bool(env_file_path)},
+            "local_stt": {
+                "ready": local_stt_ready,
+                "status": "ready via faster-whisper" if local_stt_ready else "install optional `faster-whisper` for offline STT",
+                "cost": "free/local",
+            },
+            "local_tts": {
+                "ready": local_tts_ready,
+                "status": local_tts_status["status"],
+                "provider": local_tts_status["provider"],
+                "cost": "free/local",
+            },
+            "paid_stt": {
+                "ready": paid_stt_ready,
+                "status": "configured for OpenAI-compatible STT" if paid_stt_ready else "add OpenAI-compatible STT env refs",
+                "cost": "provider usage",
+            },
+            "paid_tts": {
+                "ready": paid_tts_ready,
+                "status": paid_tts_status["status"],
+                "provider": paid_tts_status["provider"],
+                "cost": "provider usage",
+            },
         }
-    if _local_kokoro_package_available():
+
+
+
+    except Exception:
+        return {}
+def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    try:
+        if _local_kokoro_ready(env_map=env_map):
+            return {
+                "ready": True,
+                "provider": LOCAL_KOKORO_TTS_PROVIDER,
+                "status": "ready via Kokoro local neural TTS",
+            }
+        if _local_kokoro_package_available():
+            return {
+                "ready": False,
+                "provider": LOCAL_KOKORO_TTS_PROVIDER,
+                "status": (
+                    f"configure {ENV_KOKORO_MODEL_PATH} and {ENV_KOKORO_VOICES_PATH} "
+                    "for Kokoro local neural TTS"
+                ),
+            }
+        if _local_pyttsx3_available():
+            return {
+                "ready": True,
+                "provider": LOCAL_TTS_PROVIDER,
+                "status": "ready via pyttsx3 basic system TTS",
+            }
         return {
             "ready": False,
-            "provider": LOCAL_KOKORO_TTS_PROVIDER,
-            "status": (
-                f"configure {ENV_KOKORO_MODEL_PATH} and {ENV_KOKORO_VOICES_PATH} "
-                "for Kokoro local neural TTS"
-            ),
+            "provider": "none",
+            "status": "install optional Kokoro for better offline TTS, or `pyttsx3` for basic system voices",
         }
-    if _local_pyttsx3_available():
-        return {
-            "ready": True,
-            "provider": LOCAL_TTS_PROVIDER,
-            "status": "ready via pyttsx3 basic system TTS",
-        }
-    return {
-        "ready": False,
-        "provider": "none",
-        "status": "install optional Kokoro for better offline TTS, or `pyttsx3` for basic system voices",
-    }
 
 
+
+    except Exception:
+        return {}
 def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
-    if env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID):
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    try:
+        if env_map.get("ELEVENLABS_API_KEY") and env_map.get(ENV_TTS_VOICE_ID):
+            return {
+                "ready": True,
+                "provider": "elevenlabs",
+                "status": "configured for ElevenLabs TTS",
+            }
+        openai_secret_ref = env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY"
+        openai_realtime_selected = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower() in OPENAI_REALTIME_PROVIDER_ALIASES
+        if openai_realtime_selected and env_map.get(openai_secret_ref):
+            return {
+                "ready": True,
+                "provider": OPENAI_REALTIME_TTS_PROVIDER,
+                "status": "configured for OpenAI GPT Realtime 2 voice",
+            }
         return {
-            "ready": True,
-            "provider": "elevenlabs",
-            "status": "configured for ElevenLabs TTS",
+            "ready": False,
+            "provider": "none",
+            "status": f"add ElevenLabs voice settings, or set {ENV_TTS_PROVIDER}=openai-realtime with an OpenAI key for GPT Realtime 2",
         }
-    openai_secret_ref = env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY"
-    openai_realtime_selected = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower() in OPENAI_REALTIME_PROVIDER_ALIASES
-    if openai_realtime_selected and env_map.get(openai_secret_ref):
-        return {
-            "ready": True,
-            "provider": OPENAI_REALTIME_TTS_PROVIDER,
-            "status": "configured for OpenAI GPT Realtime 2 voice",
-        }
-    return {
-        "ready": False,
-        "provider": "none",
-        "status": f"add ElevenLabs voice settings, or set {ENV_TTS_PROVIDER}=openai-realtime with an OpenAI key for GPT Realtime 2",
-    }
 
 
+
+    except Exception:
+        return {}
 def _active_tts_status(*, env_map: dict[str, str], local_tts_status: dict[str, Any]) -> dict[str, Any]:
-    selected_provider = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower()
-    paid_tts_status = _paid_tts_status(env_map=env_map)
-    if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "local"}:
-        return local_tts_status
-    if selected_provider in {"elevenlabs", *OPENAI_REALTIME_PROVIDER_ALIASES}:
+    if not isinstance(env_map, str): env_map = str(env_map or '')
+    if not isinstance(local_tts_status, str): local_tts_status = str(local_tts_status or '')
+    try:
+        selected_provider = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower()
+        paid_tts_status = _paid_tts_status(env_map=env_map)
+        if selected_provider in {"kokoro", "kokoro-onnx", "local-kokoro", "pyttsx3", "local"}:
+            return local_tts_status
+        if selected_provider in {"elevenlabs", *OPENAI_REALTIME_PROVIDER_ALIASES}:
+            return paid_tts_status
+        if local_tts_status.get("ready"):
+            return local_tts_status
         return paid_tts_status
-    if local_tts_status.get("ready"):
-        return local_tts_status
-    return paid_tts_status
 
 
+
+    except Exception:
+        return {}
 def _build_speak_delivery_trace(
     *,
     request: dict[str, Any],
