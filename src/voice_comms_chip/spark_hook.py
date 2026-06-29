@@ -113,6 +113,59 @@ VOICE_ENV_KEYS = {
 }
 
 
+import ipaddress
+from urllib.parse import urlparse
+
+_ALLOWED_TRANSCRIPTION_HOSTS = {
+    "api.openai.com",
+    "api.openai.azure.com",
+}
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_transcription_base_url(url: str) -> str:
+    """Validate base_url for transcription providers to prevent SSRF."""
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "wss"):
+        raise ValueError(
+            f"Transcription base_url must use HTTPS/WSS scheme, got {parsed.scheme!r}"
+        )
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"Transcription base_url has no hostname: {url!r}")
+    try:
+        ip = ipaddress.ip_address(hostname)
+        for net in _BLOCKED_NETWORKS:
+            if ip in net:
+                raise ValueError(
+                    f"Transcription base_url points to blocked network address: {hostname}"
+                )
+    except ValueError as exc:
+        if "blocked network" in str(exc) or "HTTPS/WSS" in str(exc):
+            raise
+        # Not an IP address — check hostname allowlist
+        if hostname not in _ALLOWED_TRANSCRIPTION_HOSTS:
+            # Allow subdomains of allowed hosts
+            allowed = any(hostname.endswith("." + h) or hostname == h for h in _ALLOWED_TRANSCRIPTION_HOSTS)
+            if not allowed:
+                raise ValueError(
+                    f"Transcription base_url hostname {hostname!r} is not in the allowlist"
+                )
+    return url
+
+
 class _PublicHookInputError(ValueError):
     def __init__(self, error_code: str, message: str) -> None:
         super().__init__(message)
@@ -1376,6 +1429,7 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
         )
+    _validate_transcription_base_url(base_url)
     return {
         "provider_id": provider_id,
         "provider_kind": provider_kind,
@@ -1409,10 +1463,12 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
             raise ValueError(_missing_voice_secret_message("Voice transcription"))
+        resolved_base_url = base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL
+        _validate_transcription_base_url(resolved_base_url)
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
-            "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            "base_url": resolved_base_url,
             "secret_value": str(secret_value).strip(),
         }
     openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
