@@ -1676,6 +1676,7 @@ def test_coherence_reports_mismatch_when_caption_differs_from_spoken_text(tmp_pa
                 "text": "The spoken words.",
                 "caption_text": "Different caption text.",
                 "coherence_mode": "exact",
+                "governor_decision": _voice_governor_decision("voice.speak"),
             }
         )
 
@@ -1705,6 +1706,7 @@ def test_coherence_passes_when_caption_matches_spoken_text(tmp_path):
                 "text": "Exact match words.",
                 "caption_text": "Exact match words.",
                 "coherence_mode": "exact",
+                "governor_decision": _voice_governor_decision("voice.speak"),
             }
         )
 
