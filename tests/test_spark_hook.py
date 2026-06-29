@@ -183,7 +183,7 @@ def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
         )
     assert result["returncode"] == 0
     assert result["result"]["ready"] is False
-    assert "is not in the allowlist" in result["result"]["reason"]
+    assert "custom provider transcription compatibility is not verified yet" in result["result"]["reason"]
 
 
 def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_path):
@@ -1003,7 +1003,7 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
     ):
         result = handle_voice_transcribe_hook(payload)
 
-    assert result["returncode"] == 0
+    assert result["returncode"] == 1
     assert result["result"]["mode"] == "deterministic_fallback"
     assert "Deterministic fallback transcript" in result["result"]["transcript_text"]
     assert "simulated provider outage" in result["result"]["fallback_reason"]
