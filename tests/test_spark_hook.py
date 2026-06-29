@@ -1250,7 +1250,7 @@ def test_voice_speak_coherence_fails_on_exact_caption_mismatch():
         payload={"caption_text": "Different caption.", "coherence_mode": "exact"},
     )
 
-    assert result["check"] == "failed"
+    assert result["check"] == "mismatch"
     assert result["caption_matches_spoken"] is False
 
 
