@@ -8,7 +8,6 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILE_PATH = PROJECT_ROOT / "voices" / "spark_core.voice_profile.json"
 
-# Allowed directories for profile loading
 ALLOWED_DIRECTORIES = [
     PROJECT_ROOT / "voices",
     PROJECT_ROOT,
