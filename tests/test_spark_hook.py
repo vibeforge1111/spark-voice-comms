@@ -183,7 +183,7 @@ def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
         )
     assert result["returncode"] == 0
     assert result["result"]["ready"] is False
-    assert "is not in the allowlist" in result["result"]["reason"]
+    assert "custom provider transcription compatibility is not verified yet" in result["result"]["reason"]
 
 
 def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_path):
@@ -681,7 +681,7 @@ def test_cli_main_rejects_non_object_payload_before_hook_execution(tmp_path):
     assert exit_code == 1
     assert payload["returncode"] == 1
     assert payload["error_code"] == "voice_hook_input_not_object"
-    assert payload["error"] == "Voice hook input must be a JSON object."
+    assert payload["error"] == "An internal error occurred. Check logs for details."
     assert payload["stderr"] == payload["error"]
     assert payload["result"] == {}
 
@@ -712,7 +712,7 @@ def test_cli_main_rejects_oversized_hook_input_before_execution(tmp_path):
     assert exit_code == 1
     assert payload["returncode"] == 1
     assert payload["error_code"] == "voice_hook_input_too_large"
-    assert payload["error"] == "Voice hook input is too large."
+    assert payload["error"] == "An internal error occurred. Check logs for details."
     assert payload["result"] == {}
 
 
@@ -892,7 +892,7 @@ def test_cli_main_returns_bounded_error_for_malformed_audio_base64(tmp_path):
     assert exit_code == 1
     assert result["returncode"] == 1
     assert result["error_code"] == "voice_transcribe_audio_invalid_base64"
-    assert result["error"] == "voice.transcribe audio_base64 must be valid base64 audio bytes."
+    assert result["error"] == "An internal error occurred. Check logs for details."
     assert result["stderr"] == result["error"]
     assert result["stdout"] == ""
     assert result["result"] == {}
@@ -953,7 +953,7 @@ def test_cli_main_returns_bounded_error_for_oversized_audio(tmp_path):
     assert exit_code == 1
     assert result["returncode"] == 1
     assert result["error_code"] == "voice_transcribe_audio_too_large"
-    assert result["error"] == "voice.transcribe audio_base64 is too large."
+    assert result["error"] == "An internal error occurred. Check logs for details."
     assert result["stderr"] == result["error"]
     assert result["stdout"] == ""
     assert result["result"] == {}
