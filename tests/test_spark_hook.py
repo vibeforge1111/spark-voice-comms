@@ -1734,6 +1734,7 @@ def test_coherence_passes_in_caption_preview_mode_even_when_mismatch(tmp_path):
                 "text": "Spoken text.",
                 "caption_text": "Preview caption.",
                 "coherence_mode": "caption_preview",
+                "governor_decision": _voice_governor_decision("voice.speak"),
             }
         )
 
@@ -1760,6 +1761,7 @@ def test_coherence_passes_when_no_caption_provided(tmp_path):
             {
                 "builder_env_file_path": str(env_file),
                 "text": "Spoken words only.",
+                "governor_decision": _voice_governor_decision("voice.speak"),
             }
         )
 
