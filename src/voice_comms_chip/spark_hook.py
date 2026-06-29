@@ -1285,7 +1285,12 @@ def _build_speak_coherence(*, request: dict[str, Any], payload: dict[str, Any]) 
     caption_fingerprint = _text_fingerprint(caption_text)
     spoken_fingerprint = _text_fingerprint(spoken_text)
     if caption_text:
-        check = "passed" if caption_text == spoken_text or mode == "caption_preview" else "failed"
+        if mode == "caption_preview":
+            check = "passed"
+        elif caption_text == spoken_text:
+            check = "passed"
+        else:
+            check = "mismatch"
     else:
         check = "passed"
     return {

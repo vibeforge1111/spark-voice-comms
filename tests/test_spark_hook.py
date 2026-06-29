@@ -1250,7 +1250,7 @@ def test_voice_speak_coherence_fails_on_exact_caption_mismatch():
         payload={"caption_text": "Different caption.", "coherence_mode": "exact"},
     )
 
-    assert result["check"] == "failed"
+    assert result["check"] == "mismatch"
     assert result["caption_matches_spoken"] is False
 
 
@@ -1656,3 +1656,115 @@ def test_constants_are_reasonable():
     assert MAX_PROVIDER_AUDIO_RESPONSE_BYTES == 50 * 1024 * 1024
     assert MAX_PROVIDER_JSON_RESPONSE_BYTES == 1 * 1024 * 1024
     assert MAX_PROVIDER_ERROR_RESPONSE_BYTES == 64 * 1024
+def test_coherence_reports_mismatch_when_caption_differs_from_spoken_text(tmp_path):
+    """When caption_text is provided but doesn't match spoken text in exact mode,
+    the coherence check should report 'mismatch', not 'not_run'."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"ELEVENLABS_API_KEY={FAKE_ELEVENLABS_KEY}\n"
+        f"VOICE_TTS_ELEVENLABS_VOICE_ID={FAKE_ELEVENLABS_VOICE_ID}\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, timeout: int = 30):
+        return _FakeBinaryHttpResponse(b"fake-mpeg-bytes")
+
+    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "text": "The spoken words.",
+                "caption_text": "Different caption text.",
+                "coherence_mode": "exact",
+                "governor_decision": _voice_governor_decision("voice.speak"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["coherence"]["check"] == "mismatch"
+    assert result["result"]["coherence"]["caption_matches_spoken"] is False
+    assert result["result"]["coherence"]["spoken_text_characters"] == len("The spoken words.")
+    assert result["result"]["coherence"]["caption_text_characters"] == len("Different caption text.")
+
+
+def test_coherence_passes_when_caption_matches_spoken_text(tmp_path):
+    """When caption_text matches spoken text exactly, the coherence check should pass."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"ELEVENLABS_API_KEY={FAKE_ELEVENLABS_KEY}\n"
+        f"VOICE_TTS_ELEVENLABS_VOICE_ID={FAKE_ELEVENLABS_VOICE_ID}\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, timeout: int = 30):
+        return _FakeBinaryHttpResponse(b"fake-mpeg-bytes")
+
+    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "text": "Exact match words.",
+                "caption_text": "Exact match words.",
+                "coherence_mode": "exact",
+                "governor_decision": _voice_governor_decision("voice.speak"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["coherence"]["check"] == "passed"
+    assert result["result"]["coherence"]["caption_matches_spoken"] is True
+
+
+def test_coherence_passes_in_caption_preview_mode_even_when_mismatch(tmp_path):
+    """In caption_preview mode, the coherence check should pass even when caption differs."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"ELEVENLABS_API_KEY={FAKE_ELEVENLABS_KEY}\n"
+        f"VOICE_TTS_ELEVENLABS_VOICE_ID={FAKE_ELEVENLABS_VOICE_ID}\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, timeout: int = 30):
+        return _FakeBinaryHttpResponse(b"fake-mpeg-bytes")
+
+    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "text": "Spoken text.",
+                "caption_text": "Preview caption.",
+                "coherence_mode": "caption_preview",
+                "governor_decision": _voice_governor_decision("voice.speak"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["coherence"]["check"] == "passed"
+    assert result["result"]["coherence"]["caption_matches_spoken"] is False
+    assert result["result"]["coherence"]["mode"] == "caption_preview"
+
+
+def test_coherence_passes_when_no_caption_provided(tmp_path):
+    """When no caption_text is provided, the coherence check should pass."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"ELEVENLABS_API_KEY={FAKE_ELEVENLABS_KEY}\n"
+        f"VOICE_TTS_ELEVENLABS_VOICE_ID={FAKE_ELEVENLABS_VOICE_ID}\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, timeout: int = 30):
+        return _FakeBinaryHttpResponse(b"fake-mpeg-bytes")
+
+    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+        result = handle_voice_speak_hook(
+            {
+                "builder_env_file_path": str(env_file),
+                "text": "Spoken words only.",
+                "governor_decision": _voice_governor_decision("voice.speak"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["coherence"]["check"] == "passed"
+    assert result["result"]["coherence"]["caption_text_characters"] == 0
