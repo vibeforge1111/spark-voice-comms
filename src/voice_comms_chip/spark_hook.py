@@ -1438,6 +1438,17 @@ def _strip_surrounding_quotes(value: str) -> str:
 
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
     path = Path(env_file_path)
+    resolved = path.resolve()
+    # Path traversal guard: the resolved path must stay within safe directories
+    # so that an attacker cannot use "../../" sequences to read arbitrary files.
+    import tempfile
+    project_root = Path(__file__).resolve().parent.parent.parent
+    cwd = Path.cwd().resolve()
+    temp_dir = Path(tempfile.gettempdir()).resolve()
+    if not (resolved.is_relative_to(project_root) or resolved.is_relative_to(cwd) or resolved.is_relative_to(temp_dir)):
+        raise ValueError(
+            f"Builder env file path is outside allowed directories: '{env_file_path}'."
+        )
     if not path.exists():
         raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
     env_map: dict[str, str] = {}
