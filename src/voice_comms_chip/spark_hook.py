@@ -1150,8 +1150,8 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
-        except Exception as exc:
-            env_note = f"Builder env file unavailable: {exc}"
+        except Exception:
+            env_note = "Builder env file unavailable"
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
     local_tts_ready = local_tts_status["ready"]
