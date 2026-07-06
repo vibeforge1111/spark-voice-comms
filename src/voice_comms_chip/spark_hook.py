@@ -2091,7 +2091,7 @@ def _build_deterministic_fallback_transcript(
     cleaned_reason = " ".join(str(reason or "").strip().split())
     return (
         f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
-        f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
+        f"{len(audio_bytes)} bytes, source {Path(filename).name or 'unknown'}). {snippet} "
         f"Provider reason: {cleaned_reason or 'unknown failure'}."
     )
 
