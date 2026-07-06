@@ -1033,7 +1033,7 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
         except (OSError, ValueError):
-            pass
+            logger.debug("voice-comms: could not read builder env file '%s'", env_file_path)
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
