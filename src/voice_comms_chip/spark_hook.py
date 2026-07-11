@@ -2088,7 +2088,14 @@ def _build_deterministic_fallback_transcript(
         "Mic packet decoded locally.",
     ]
     snippet = snippets[seed % len(snippets)]
-    cleaned_reason = " ".join(str(reason or "").strip().split())
+    # Sanitize: cap length and strip filesystem paths / API error bodies
+    raw = str(reason or "").strip()
+    if len(raw) > 120:
+        raw = raw[:120] + "…"
+    # Remove anything that looks like a filesystem path or URL
+    import re as _re
+    raw = _re.sub(r"(?:/[^\s]{3,}|[A-Z]:\\[^\s]{3,}|https?://[^\s]{3,})", "<redacted>", raw)
+    cleaned_reason = " ".join(raw.split())
     return (
         f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
         f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
