@@ -2521,7 +2521,11 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--quiet", action="store_true", help="Suppress non-error stderr output")
     args = parser.parse_args()
+
+    if args.quiet:
+        sys.stderr = io.StringIO()
 
     try:
         payload = _load_hook_payload(Path(args.input), hook=args.hook)
