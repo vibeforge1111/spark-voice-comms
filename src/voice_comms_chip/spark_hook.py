@@ -911,7 +911,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
-                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason="voice transcription failed"),
                     payload=payload,
                     audio_bytes=len(audio_bytes),
                     started_at=transcribe_started,
@@ -953,7 +953,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         if fallback_mode == "deterministic":
             return _with_transcribe_runtime_state(
-                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason="voice transcription failed"),
                 payload=payload,
                 audio_bytes=len(audio_bytes),
                 started_at=transcribe_started,
@@ -2436,7 +2436,7 @@ def _hook_error_payload(exc: Exception) -> dict[str, Any]:
         detail = "Voice hook input must be valid JSON."
         error_code = "voice_hook_invalid_json"
     else:
-        detail = str(exc)
+        detail = "An unexpected error occurred in the voice hook."
     payload: dict[str, Any] = {
         "returncode": 1,
         "stdout": "",
