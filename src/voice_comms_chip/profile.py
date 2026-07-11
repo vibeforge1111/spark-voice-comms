@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -111,3 +112,25 @@ def get_provider_voice_profile(profile: dict[str, Any], provider_id: str) -> dic
     )
     payload = provider_voices.get(provider_id)
     return payload if isinstance(payload, dict) else {}
+
+
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Validate a voice profile JSON file")
+    parser.add_argument("--validate", metavar="PATH", help="Validate profile JSON file without running")
+    args = parser.parse_args()
+
+    if args.validate:
+        try:
+            profile = load_voice_profile(args.validate)
+            print(f"Profile valid: {profile.get('profile_name', 'unknown')}")
+            return 0
+        except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            print(f"Profile invalid: {exc}", file=sys.stderr)
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
