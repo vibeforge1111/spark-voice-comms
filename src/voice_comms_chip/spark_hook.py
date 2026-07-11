@@ -2019,6 +2019,23 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
     return ("audio/mpeg", ".mp3", False)
 
 
+def _assert_no_private_ws_host(url: str) -> None:
+    """Reject WebSocket URLs targeting private/local hosts to prevent SSRF."""
+    import ipaddress
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return
+    if host == "localhost":
+        raise ValueError(f"WebSocket URL must not target a local host: {host!r}")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return  # hostname — not an IP, allow
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+        raise ValueError(f"WebSocket URL must not target a private or reserved IP address: {host!r}")
+
+
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
     if normalized.startswith("http://"):
@@ -2027,7 +2044,9 @@ def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
         normalized = "wss://" + normalized[len("https://") :]
     if not normalized.endswith("/realtime"):
         normalized = f"{normalized}/realtime"
-    return f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
+    result = f"{normalized}?{urllib.parse.urlencode({'model': model_id})}"
+    _assert_no_private_ws_host(result)
+    return result
 
 
 def _pcm16_to_wav(pcm_audio: bytes, *, sample_rate: int) -> bytes:
