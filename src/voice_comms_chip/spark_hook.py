@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import socket
 import subprocess
 import ssl
 import sys
@@ -1969,8 +1970,24 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        deadline = time.monotonic() + timeout
         while True:
-            raw_message = ws.recv()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS timed out after {timeout}s waiting for response.done"
+                )
+            try:
+                if hasattr(ws, "settimeout"):
+                    ws.settimeout(min(remaining, timeout))
+            except (AttributeError, OSError):
+                pass
+            try:
+                raw_message = ws.recv()
+            except socket.timeout:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS timed out after {timeout}s waiting for response.done"
+                )
             if not raw_message:
                 continue
             # Defensive second line of defense behind the connect-time max_size:
