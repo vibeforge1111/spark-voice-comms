@@ -1910,7 +1910,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     sample_rate = int(request.get("sample_rate") or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
     timeout = float(request.get("timeout_seconds") or DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS)
     headers = [
-        "Authorization: Bearer " + str(request["secret_value"]),
+        f"Authorization: Bearer {request['secret_value']}",
     ]
     # Enforce a per-frame size cap at the library level so an oversized frame is
     # rejected during recv() rather than buffered into memory first (OOM guard).
