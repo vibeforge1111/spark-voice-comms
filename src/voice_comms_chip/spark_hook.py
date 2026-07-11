@@ -410,7 +410,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
                         "Next: check the local package error, then rerun `/voice install kokoro`."
                     ),
                     "target": target,
-                    "python": sys.executable,
+                    "python": _python_runtime_label(),
                     "installed": False,
                     "already_installed": False,
                 },
@@ -428,7 +428,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             "reply_text": reply_text,
             "target": target,
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": is_ready,
             "already_installed": was_ready,
             "kokoro_ready": kokoro_ready,
@@ -466,7 +466,7 @@ def _install_faster_whisper() -> dict[str, Any]:
                         "Next: check the local package error, then rerun `/voice install faster-whisper`."
                     ),
                     "target": "faster-whisper",
-                    "python": sys.executable,
+                    "python": _python_runtime_label(),
                     "installed": False,
                     "already_installed": False,
                     "stt_ready": False,
@@ -482,7 +482,7 @@ def _install_faster_whisper() -> dict[str, Any]:
         "result": {
             "reply_text": _faster_whisper_install_reply_text(install_status=install_status, stt_ready=is_ready),
             "target": "faster-whisper",
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": is_ready,
             "already_installed": was_ready,
             "stt_ready": is_ready,
@@ -524,7 +524,7 @@ def _install_local_voice_stack(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             "reply_text": "\n".join(reply_lines),
             "target": "local",
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": bool(stt_ready and kokoro_installed),
             "stt_ready": stt_ready,
             "kokoro_installed": kokoro_installed,
