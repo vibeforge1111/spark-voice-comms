@@ -1436,10 +1436,36 @@ def _strip_surrounding_quotes(value: str) -> str:
     return value
 
 
+def _approved_env_file_base() -> Path:
+    root = os.environ.get("SPARK_PROJECT_ROOT", "").strip()
+    if root:
+        return Path(root).resolve()
+    return (Path.home() / ".spark").resolve()
+
+
+def _validate_env_file_path(env_file_path: str) -> Path:
+    """Resolve and containment-check an env file path from the HTTP payload.
+
+    Raises ValueError if the resolved path escapes the approved base directory.
+    This prevents HTTP callers from using builder_env_file_path to read
+    arbitrary files (e.g. ../../.env or /etc/shadow).
+    """
+    resolved = Path(env_file_path).resolve()
+    approved = _approved_env_file_base()
+    try:
+        resolved.relative_to(approved)
+    except ValueError:
+        raise ValueError(
+            "Builder env file path is outside the approved base directory. "
+            "Paths must be inside the configured SPARK_PROJECT_ROOT (or ~/.spark by default)."
+        )
+    return resolved
+
+
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
-    path = Path(env_file_path)
+    path = _validate_env_file_path(env_file_path)
     if not path.exists():
-        raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
+        raise ValueError("Builder env file does not exist at the specified path.")
     env_map: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
