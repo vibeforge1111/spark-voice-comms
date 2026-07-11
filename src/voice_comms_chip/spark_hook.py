@@ -2521,7 +2521,11 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--verbose", action="store_true", help="Enable DEBUG logging level")
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     try:
         payload = _load_hook_payload(Path(args.input), hook=args.hook)
