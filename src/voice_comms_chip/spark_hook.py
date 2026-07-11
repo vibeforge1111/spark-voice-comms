@@ -1193,6 +1193,15 @@ def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
             "status": "ready via Kokoro local neural TTS",
         }
     if _local_kokoro_package_available():
+        if _local_pyttsx3_available():
+            return {
+                "ready": True,
+                "provider": LOCAL_TTS_PROVIDER,
+                "status": (
+                    "ready via pyttsx3 basic system TTS; "
+                    f"Kokoro package is installed but needs {ENV_KOKORO_MODEL_PATH} and {ENV_KOKORO_VOICES_PATH} for neural TTS"
+                ),
+            }
         return {
             "ready": False,
             "provider": LOCAL_KOKORO_TTS_PROVIDER,
