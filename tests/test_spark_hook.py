@@ -364,7 +364,11 @@ def test_voice_status_default_requires_local_faster_whisper(tmp_path):
 def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("CUSTOM_API_KEY=custom-test-key\n", encoding="utf-8")
-    with patch.dict("os.environ", {"VOICE_TRANSCRIBE_PROVIDER": "builder"}, clear=False), patch(
+    with patch.dict(
+        "os.environ",
+        {"VOICE_TRANSCRIBE_PROVIDER": "builder", "SPARK_VOICE_ALLOWED_SECRET_REFS": "CUSTOM_API_KEY"},
+        clear=False,
+    ), patch(
         "voice_comms_chip.spark_hook._local_faster_whisper_available",
         return_value=False,
     ):
@@ -405,7 +409,11 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+    with patch.dict(
+        "os.environ",
+        {"SPARK_VOICE_ALLOWED_SECRET_REFS": "CUSTOM_API_KEY"},
+        clear=False,
+    ), patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         return_value=True,
     ):
