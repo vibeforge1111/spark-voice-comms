@@ -82,6 +82,7 @@ MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
 MAX_WEBSOCKET_MESSAGE_BYTES = 10 * 1024 * 1024         # 10 MB per message
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
+VOICE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VOICE_ENV_KEYS = {
     "OPENAI_API_KEY",
     "VOICE_TRANSCRIBE_PROVIDER",
@@ -1476,15 +1477,54 @@ def _strip_surrounding_quotes(value: str) -> str:
     return value
 
 
+def _voice_local_roots(*, explicit_env: str) -> tuple[Path, ...]:
+    configured = [
+        os.environ.get(explicit_env),
+        os.environ.get("SPARK_HOME"),
+        str(Path.home() / ".spark"),
+        str(VOICE_PROJECT_ROOT),
+    ]
+    roots: list[Path] = []
+    for raw in configured:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        resolved = Path(text).expanduser().resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+def _resolve_voice_local_file(
+    value: str,
+    *,
+    roots: tuple[Path, ...],
+    boundary_label: str,
+) -> Path:
+    text = str(value or "").strip()
+    if not text or any(ord(char) < 32 for char in text):
+        raise ValueError(f"Local path must be a file within {boundary_label}.")
+    resolved = Path(text).expanduser().resolve()
+    if not any(resolved == root or resolved.is_relative_to(root) for root in roots):
+        raise ValueError(f"Local path must be a file within {boundary_label}.")
+    if not resolved.is_file():
+        raise ValueError(f"Local file was not found within {boundary_label}.")
+    return resolved
+
+
 def _read_env_map(*, env_file_path: str) -> dict[str, str]:
-    path = Path(env_file_path)
-    if not path.exists():
-        raise ValueError(f"Builder env file does not exist at '{env_file_path}'.")
+    path = _resolve_voice_local_file(
+        env_file_path,
+        roots=_voice_local_roots(explicit_env="SPARK_VOICE_ENV_ROOT"),
+        boundary_label="approved voice configuration roots",
+    )
     env_map: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
         name, _, value = stripped.partition("=")
         env_map[name.strip()] = _strip_surrounding_quotes(value.strip())
     return env_map
@@ -1682,12 +1722,23 @@ def _resolve_kokoro_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
-    voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
-    if not model_path or not voices_path:
+    raw_model_path = str(tts.get("model_path") or env_map.get(ENV_KOKORO_MODEL_PATH) or "").strip()
+    raw_voices_path = str(tts.get("voices_path") or env_map.get(ENV_KOKORO_VOICES_PATH) or "").strip()
+    if not raw_model_path or not raw_voices_path:
         raise ValueError(
             f"Kokoro TTS requires local model assets. Set `{ENV_KOKORO_MODEL_PATH}` and `{ENV_KOKORO_VOICES_PATH}`."
         )
+    asset_roots = _voice_local_roots(explicit_env="SPARK_VOICE_ASSET_ROOT")
+    model_path = _resolve_voice_local_file(
+        raw_model_path,
+        roots=asset_roots,
+        boundary_label="approved voice asset roots",
+    )
+    voices_path = _resolve_voice_local_file(
+        raw_voices_path,
+        roots=asset_roots,
+        boundary_label="approved voice asset roots",
+    )
     speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
     if speed is None:
         speed = 1.0
@@ -1697,12 +1748,12 @@ def _resolve_kokoro_tts_request(
         "text": text,
         "voice_id": str(tts.get("voice") or tts.get("voice_id") or env_map.get(ENV_KOKORO_VOICE) or DEFAULT_KOKORO_VOICE).strip()
         or DEFAULT_KOKORO_VOICE,
-        "model_id": Path(model_path).name or "kokoro-v1.0.onnx",
+        "model_id": model_path.name or "kokoro-v1.0.onnx",
         "mime_type": "audio/wav",
         "file_extension": ".wav",
         "voice_compatible": False,
-        "model_path": model_path,
-        "voices_path": voices_path,
+        "model_path": str(model_path),
+        "voices_path": str(voices_path),
         "speed": max(0.5, min(2.0, float(speed))),
         "lang": str(tts.get("lang") or env_map.get(ENV_KOKORO_LANG) or DEFAULT_KOKORO_LANG).strip()
         or DEFAULT_KOKORO_LANG,
@@ -1909,12 +1960,20 @@ def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
         raise RuntimeError(f"Kokoro model_path is empty. Set `{ENV_KOKORO_MODEL_PATH}` or pass `model_path` in the TTS config.")
     if not raw_voices_path:
         raise RuntimeError(f"Kokoro voices_path is empty. Set `{ENV_KOKORO_VOICES_PATH}` or pass `voices_path` in the TTS config.")
-    model_path = Path(raw_model_path)
-    voices_path = Path(raw_voices_path)
-    if not model_path.exists():
-        raise RuntimeError("Kokoro model file was not found")
-    if not voices_path.exists():
-        raise RuntimeError("Kokoro voices file was not found")
+    asset_roots = _voice_local_roots(explicit_env="SPARK_VOICE_ASSET_ROOT")
+    try:
+        model_path = _resolve_voice_local_file(
+            raw_model_path,
+            roots=asset_roots,
+            boundary_label="approved voice asset roots",
+        )
+        voices_path = _resolve_voice_local_file(
+            raw_voices_path,
+            roots=asset_roots,
+            boundary_label="approved voice asset roots",
+        )
+    except ValueError as exc:
+        raise RuntimeError("Kokoro model assets are unavailable within approved voice asset roots.") from exc
     kokoro = kokoro_module.Kokoro(str(model_path), str(voices_path))
     samples, sample_rate = kokoro.create(
         request["text"],

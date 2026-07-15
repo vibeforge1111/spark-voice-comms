@@ -62,7 +62,7 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     target = Path(path) if path else DEFAULT_PROFILE_PATH
     
     # Validate path to prevent traversal attacks
-    _validate_profile_path(target)
+    target = _validate_profile_path(target)
     
     try:
         raw = target.read_text(encoding="utf-8")
