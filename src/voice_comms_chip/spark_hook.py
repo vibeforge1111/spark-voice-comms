@@ -1865,6 +1865,7 @@ def _resolve_openai_realtime_tts_request(
         or DEFAULT_OPENAI_REALTIME_VOICE,
         "reasoning_effort": str(tts.get("reasoning_effort") or env_map.get(ENV_OPENAI_REALTIME_REASONING_EFFORT) or "").strip(),
         "instructions": _openai_realtime_tts_instructions(style_instructions),
+        "instructions_authority": "voice-style-boundary-v1",
         "sample_rate": sample_rate,
         "timeout_seconds": max(5.0, min(120.0, float(timeout_seconds))),
         "mime_type": "audio/wav",
@@ -2066,6 +2067,11 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     )
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
+    raw_instructions = str(request.get("instructions") or "")
+    if raw_instructions and request.get("instructions_authority") != "voice-style-boundary-v1":
+        bounded_instructions = _openai_realtime_tts_instructions(raw_instructions)
+    else:
+        bounded_instructions = raw_instructions
     try:
         session_payload: dict[str, Any] = {
             "type": "session.update",
@@ -2081,8 +2087,8 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 },
             },
         }
-        if request.get("instructions"):
-            session_payload["session"]["instructions"] = str(request["instructions"])
+        if bounded_instructions:
+            session_payload["session"]["instructions"] = bounded_instructions
         reasoning_effort = str(request.get("reasoning_effort") or "").strip()
         if reasoning_effort:
             session_payload["session"]["reasoning"] = {"effort": reasoning_effort}
@@ -2093,7 +2099,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                     "type": "response.create",
                     "response": {
                         "conversation": "none",
-                        "instructions": str(request.get("instructions") or ""),
+                        "instructions": bounded_instructions,
                         "output_modalities": ["audio"],
                         "audio": {
                             "output": {
