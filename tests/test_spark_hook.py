@@ -1440,7 +1440,8 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
     assert result["returncode"] == 0
     assert result["result"]["mode"] == "deterministic_fallback"
     assert "Deterministic fallback transcript" in result["result"]["transcript_text"]
-    assert "simulated provider outage" in result["result"]["fallback_reason"]
+    assert result["result"]["fallback_reason"] == "Transcription provider unavailable."
+    assert "simulated provider outage" not in str(result)
 
 
 def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fails(tmp_path):
@@ -1472,7 +1473,8 @@ def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fai
     assert result["result"]["mode"] == "local_faster_whisper"
     assert result["result"]["provider_id"] == "local_faster_whisper"
     assert result["result"]["transcript_text"] == "Local fallback transcript"
-    assert "simulated provider outage" in result["result"]["fallback_reason"]
+    assert result["result"]["fallback_reason"] == "Transcription provider unavailable."
+    assert "simulated provider outage" not in str(result)
 
 
 def test_local_faster_whisper_uses_configured_quality_settings(tmp_path):

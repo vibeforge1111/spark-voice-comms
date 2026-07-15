@@ -45,6 +45,7 @@ DEFAULT_OPENAI_REALTIME_MODEL_ID = "gpt-realtime-2"
 DEFAULT_OPENAI_REALTIME_VOICE = "coral"
 DEFAULT_OPENAI_REALTIME_SAMPLE_RATE = 24000
 DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS = 45
+PUBLIC_TRANSCRIPTION_FAILURE_REASON = "Transcription provider unavailable."
 DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
@@ -937,9 +938,14 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 filename=filename,
             )
         except Exception as exc:
+            logger.warning("Local voice transcription failed (%s).", type(exc).__name__)
             if fallback_mode == "deterministic":
                 return _with_transcribe_runtime_state(
-                    _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                    _deterministic_transcribe_response(
+                        audio_bytes=audio_bytes,
+                        filename=filename,
+                        reason=PUBLIC_TRANSCRIPTION_FAILURE_REASON,
+                    ),
                     payload=payload,
                     audio_bytes=len(audio_bytes),
                     started_at=transcribe_started,
@@ -979,9 +985,14 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
             mime_type=mime_type,
         )
     except Exception as exc:
+        logger.warning("Hosted voice transcription failed (%s).", type(exc).__name__)
         if fallback_mode == "deterministic":
             return _with_transcribe_runtime_state(
-                _deterministic_transcribe_response(audio_bytes=audio_bytes, filename=filename, reason=str(exc)),
+                _deterministic_transcribe_response(
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    reason=PUBLIC_TRANSCRIPTION_FAILURE_REASON,
+                ),
                 payload=payload,
                 audio_bytes=len(audio_bytes),
                 started_at=transcribe_started,
@@ -1006,7 +1017,7 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                     "provider_id": "local_faster_whisper",
                     "model": _resolve_local_faster_whisper_model(payload),
                     "mode": "local_faster_whisper",
-                    "fallback_reason": str(exc),
+                    "fallback_reason": PUBLIC_TRANSCRIPTION_FAILURE_REASON,
                 },
             }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
         raise
@@ -1601,7 +1612,7 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
     transcript_text = _build_deterministic_fallback_transcript(
         audio_bytes=audio_bytes,
         filename=filename,
-        reason=reason,
+        reason=PUBLIC_TRANSCRIPTION_FAILURE_REASON,
     )
     return {
         "returncode": 0,
@@ -1617,7 +1628,7 @@ def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, rea
             "provider_id": "deterministic_fallback",
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
-            "fallback_reason": reason,
+            "fallback_reason": PUBLIC_TRANSCRIPTION_FAILURE_REASON,
         },
     }
 
@@ -2219,11 +2230,10 @@ def _build_deterministic_fallback_transcript(
         "Mic packet decoded locally.",
     ]
     snippet = snippets[seed % len(snippets)]
-    cleaned_reason = " ".join(str(reason or "").strip().split())
     return (
         f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
-        f"{len(audio_bytes)} bytes, source {filename}). {snippet} "
-        f"Provider reason: {cleaned_reason or 'unknown failure'}."
+        f"{len(audio_bytes)} bytes, source voice input). {snippet} "
+        f"Provider reason: {PUBLIC_TRANSCRIPTION_FAILURE_REASON}"
     )
 
 
@@ -2395,6 +2405,12 @@ def _reject_multipart_crlf(label: str, value: str) -> None:
         raise ValueError(f"{label} must not contain CR or LF characters")
 
 
+def _reject_multipart_header_token(label: str, value: str) -> None:
+    _reject_multipart_crlf(label, value)
+    if '"' in value:
+        raise ValueError(f"{label} must not contain double-quote characters")
+
+
 def _post_multipart(
     url: str,
     *,
@@ -2405,7 +2421,7 @@ def _post_multipart(
     boundary = f"voice-chip-{uuid4().hex}"
     body = bytearray()
     for key, value in fields.items():
-        _reject_multipart_crlf("multipart field name", str(key))
+        _reject_multipart_header_token("multipart field name", str(key))
         _reject_multipart_crlf("multipart field value", str(value))
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
@@ -2415,9 +2431,9 @@ def _post_multipart(
         field_name = str(file_info["field_name"])
         filename = str(file_info["filename"])
         mime_type = str(file_info["mime_type"])
-        _reject_multipart_crlf("multipart file field name", field_name)
-        _reject_multipart_crlf("multipart filename", filename)
-        _reject_multipart_crlf("multipart content type", mime_type)
+        _reject_multipart_header_token("multipart file field name", field_name)
+        _reject_multipart_header_token("multipart filename", filename)
+        _reject_multipart_header_token("multipart content type", mime_type)
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(
             (
@@ -2601,7 +2617,7 @@ def _load_hook_payload(path: Path, *, hook: str) -> dict[str, Any]:
         raise _PublicHookInputError("voice_hook_input_too_large", "Voice hook input is too large.")
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise _PublicHookInputError("voice_hook_invalid_json", "Voice hook input must be valid JSON.") from exc
     if not isinstance(payload, dict):
         raise _PublicHookInputError("voice_hook_input_not_object", "Voice hook input must be a JSON object.")
