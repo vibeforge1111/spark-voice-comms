@@ -18,6 +18,8 @@ Do not ask users to paste provider keys into Telegram, chat logs, issue trackers
 
 Start from `.env.example`, then copy only the keys the user needs into the local Builder env file.
 
+The hook reads a Builder env file only when its resolved path stays under the voice checkout, `SPARK_HOME`, `~/.spark`, or an explicit `SPARK_VOICE_ENV_ROOT`. Set that last variable to the narrow directory containing the env file when a deployment stores it elsewhere. Symlinks that resolve outside those roots are rejected.
+
 For ElevenLabs:
 
 ```text
@@ -45,6 +47,10 @@ VOICE_TTS_KOKORO_MODEL_PATH=
 VOICE_TTS_KOKORO_VOICES_PATH=
 ```
 
+Kokoro model files follow the same containment rule. Keep them under the voice checkout, `SPARK_HOME`, or `~/.spark`; otherwise set `SPARK_VOICE_ASSET_ROOT` to the narrow model directory. Do not point the hook at a broad home or temporary directory.
+
+Only `OPENAI_API_KEY` and `ELEVENLABS_API_KEY` are accepted as provider secret references by default. A deliberate custom provider can add comma-separated environment-variable names through `SPARK_VOICE_ALLOWED_SECRET_REFS`; configure that locally, never through a Telegram payload.
+
 MiniMax and Z.ai slots may be present in env templates, but they should remain planned-provider slots until dedicated adapters and smoke tests land.
 
 ## Agent Guidance
@@ -59,6 +65,7 @@ When a user asks for voice setup, Spark should:
 - explain that Codex CLI can run missions and coding agents, but is not a voice STT/TTS provider for this chip
 - keep all secret handling outside Telegram
 - explain provider failures in local-config language, not raw provider JSON
+- treat an unavailable transcription path as a failure with no usable transcript; never substitute fabricated words for the user's audio
 - recommend scoped rollback when a tuning change feels wrong: `go back to the previous voice`
 
 ## Public Repo Hygiene

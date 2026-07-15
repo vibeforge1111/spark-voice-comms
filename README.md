@@ -255,6 +255,8 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.tr
 
 Keep provider keys in your local Builder environment file or supported Spark secret layer. Do not commit `.env` files.
 
+Voice env and local model paths are containment-checked. The checkout, `SPARK_HOME`, and `~/.spark` are trusted by default; use a narrow `SPARK_VOICE_ENV_ROOT` or `SPARK_VOICE_ASSET_ROOT` when your deployment keeps those files elsewhere. Custom provider secret names must also be explicitly opted in with `SPARK_VOICE_ALLOWED_SECRET_REFS`.
+
 Hosted STT is still supported when you explicitly want it:
 
 ```text
