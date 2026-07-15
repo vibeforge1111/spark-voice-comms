@@ -1437,9 +1437,14 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
     ):
         result = handle_voice_transcribe_hook(payload)
 
-    assert result["returncode"] == 0
+    assert result["returncode"] == 1
     assert result["result"]["mode"] == "deterministic_fallback"
-    assert "Deterministic fallback transcript" in result["result"]["transcript_text"]
+    assert result["result"]["transcript_text"] == ""
+    assert result["result"]["usable_transcript"] is False
+    assert result["stderr"] == (
+        "I couldn't transcribe that voice note because voice transcription is unavailable. "
+        "Please try again once voice is ready."
+    )
     assert result["result"]["fallback_reason"] == "Transcription provider unavailable."
     assert "simulated provider outage" not in str(result)
 

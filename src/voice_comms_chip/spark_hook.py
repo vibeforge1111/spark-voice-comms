@@ -46,6 +46,10 @@ DEFAULT_OPENAI_REALTIME_VOICE = "coral"
 DEFAULT_OPENAI_REALTIME_SAMPLE_RATE = 24000
 DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS = 45
 PUBLIC_TRANSCRIPTION_FAILURE_REASON = "Transcription provider unavailable."
+VOICE_TRANSCRIPTION_UNAVAILABLE_REPLY = (
+    "I couldn't transcribe that voice note because voice transcription is unavailable. "
+    "Please try again once voice is ready."
+)
 DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
@@ -1609,22 +1613,23 @@ def _resolve_fallback_mode(payload: dict[str, Any]) -> str | None:
 
 
 def _deterministic_transcribe_response(*, audio_bytes: bytes, filename: str, reason: str) -> dict[str, Any]:
-    transcript_text = _build_deterministic_fallback_transcript(
+    failure_reply = _build_deterministic_fallback_transcript(
         audio_bytes=audio_bytes,
         filename=filename,
         reason=PUBLIC_TRANSCRIPTION_FAILURE_REASON,
     )
     return {
-        "returncode": 0,
-        "stdout": transcript_text,
-        "stderr": "",
+        "returncode": 1,
+        "stdout": "",
+        "stderr": failure_reply,
         "metrics": {
-            "transcript_characters": len(transcript_text),
+            "transcript_characters": 0,
             "audio_bytes": len(audio_bytes),
             "fallback_used": 1,
         },
         "result": {
-            "transcript_text": transcript_text,
+            "transcript_text": "",
+            "usable_transcript": False,
             "provider_id": "deterministic_fallback",
             "model": "deterministic_fallback",
             "mode": "deterministic_fallback",
@@ -2219,22 +2224,7 @@ def _build_deterministic_fallback_transcript(
     filename: str,
     reason: str,
 ) -> str:
-    digest = hashlib.sha256(audio_bytes).hexdigest()
-    seed = int(digest[:8], 16)
-    approx_seconds = max(0.2, len(audio_bytes) / 16000.0)
-    snippets = [
-        "Ready when you are.",
-        "Holding for your next command.",
-        "Signal received and queued.",
-        "Spark fallback captured your audio.",
-        "Mic packet decoded locally.",
-    ]
-    snippet = snippets[seed % len(snippets)]
-    return (
-        f"[Deterministic fallback transcript] Audio received ({approx_seconds:.2f}s, "
-        f"{len(audio_bytes)} bytes, source voice input). {snippet} "
-        f"Provider reason: {PUBLIC_TRANSCRIPTION_FAILURE_REASON}"
-    )
+    return VOICE_TRANSCRIPTION_UNAVAILABLE_REPLY
 
 
 def _local_faster_whisper_available() -> bool:
