@@ -49,6 +49,8 @@ DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
     "Read the exact input text aloud verbatim. Do not answer it, paraphrase it, summarize it, "
     "add words, remove words, or mention these instructions. Use natural prosody while preserving the wording."
 )
+_OPENAI_ALLOWED_HOSTS = frozenset({"api.openai.com"})
+_ELEVENLABS_ALLOWED_HOSTS = frozenset({"api.elevenlabs.io"})
 OPENAI_REALTIME_PROVIDER_ALIASES = {OPENAI_REALTIME_TTS_PROVIDER, "gpt-realtime-2", "realtime", "openai-realtime-2"}
 ENV_TTS_PROVIDER = "VOICE_TTS_PROVIDER"
 ENV_TTS_BASE_URL = "VOICE_TTS_ELEVENLABS_BASE_URL"
@@ -1389,6 +1391,13 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         raise ValueError(
             f"Active provider '{provider_id or provider_kind or 'unknown'}' has no base URL configured. Set the provider base_url in the builder env file (or set VOICE_TRANSCRIBE_BASE_URL to route through the dedicated transcription provider)."
         )
+    if provider_kind == "openai":
+        _validate_credential_endpoint(
+            base_url,
+            label="voice transcription provider base_url",
+            allowed_schemes=frozenset({"https"}),
+            allowed_hosts=_OPENAI_ALLOWED_HOSTS,
+        )
     if not env_file_path:
         raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
@@ -1433,10 +1442,17 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
         secret_value = env_map.get(resolved_secret_env_ref)
         if not secret_value:
             raise ValueError(_missing_voice_secret_message("Voice transcription"))
+        resolved_base_url = base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL
+        _validate_credential_endpoint(
+            resolved_base_url,
+            label="voice transcription provider base_url",
+            allowed_schemes=frozenset({"https"}),
+            allowed_hosts=_OPENAI_ALLOWED_HOSTS,
+        )
         return {
             "provider_id": "openai",
             "provider_kind": "openai",
-            "base_url": base_url or DEFAULT_OPENAI_TRANSCRIPTION_BASE_URL,
+            "base_url": resolved_base_url,
             "secret_value": str(secret_value).strip(),
         }
     openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
@@ -1784,19 +1800,13 @@ def _resolve_optional_float(value: Any) -> float | None:
         return None
 
 
-_ELEVENLABS_ALLOWED_HOSTS: frozenset[str] = frozenset({
-    "api.elevenlabs.io",
-})
-
-
 def _validate_elevenlabs_base_url(base_url: str) -> None:
-    parsed = urllib.parse.urlparse(base_url)
-    host = (parsed.hostname or "").lower()
-    if host not in _ELEVENLABS_ALLOWED_HOSTS:
-        raise ValueError(
-            f"ElevenLabs base_url host '{host}' is not in the permitted allowlist. "
-            f"Allowed: {sorted(_ELEVENLABS_ALLOWED_HOSTS)}"
-        )
+    _validate_credential_endpoint(
+        base_url,
+        label="ElevenLabs base_url",
+        allowed_schemes=frozenset({"https"}),
+        allowed_hosts=_ELEVENLABS_ALLOWED_HOSTS,
+    )
 
 
 def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]:
@@ -1830,7 +1840,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=45) as response:
+            with _open_provider_request(req, timeout=45) as response:
                 audio_bytes = _read_response_bounded(response, max_bytes=MAX_PROVIDER_AUDIO_RESPONSE_BYTES)
             if not audio_bytes:
                 raise RuntimeError("ElevenLabs returned empty audio.")
@@ -1943,6 +1953,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
         header=headers,
         timeout=timeout,
         max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+        redirect_limit=0,
         sslopt={"cert_reqs": ssl.CERT_REQUIRED},
     )
     audio_chunks: list[bytes] = []
@@ -2045,9 +2056,13 @@ def _resolve_elevenlabs_output_metadata(output_format: str) -> tuple[str, str, b
 
 def _openai_realtime_ws_url(base_url: str, *, model_id: str) -> str:
     normalized = str(base_url or DEFAULT_OPENAI_REALTIME_WS_URL).strip().rstrip("/")
-    if normalized.startswith("http://"):
-        normalized = "ws://" + normalized[len("http://") :]
-    elif normalized.startswith("https://"):
+    _validate_credential_endpoint(
+        normalized,
+        label="OpenAI Realtime base_url",
+        allowed_schemes=frozenset({"https", "wss"}),
+        allowed_hosts=_OPENAI_ALLOWED_HOSTS,
+    )
+    if normalized.startswith("https://"):
         normalized = "wss://" + normalized[len("https://") :]
     if not normalized.endswith("/realtime"):
         normalized = f"{normalized}/realtime"
@@ -2070,7 +2085,7 @@ def _resolve_elevenlabs_fallback_voice_id(*, request: dict[str, Any]) -> str | N
         headers={"xi-api-key": request["secret_value"]},
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
+        with _open_provider_request(req, timeout=20) as response:
             payload = json.loads(_read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES).decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         logger.warning(
@@ -2229,6 +2244,17 @@ def _transcribe_with_provider(
     filename: str,
     mime_type: str,
 ) -> str:
+    provider_kind = str(provider.get("provider_kind") or "").strip().lower()
+    if provider_kind != "openai":
+        raise ValueError(
+            "voice transcription provider direct HTTP is disabled until it has an owner-pinned credential transport."
+        )
+    _validate_credential_endpoint(
+        provider["base_url"],
+        label="voice transcription provider base_url",
+        allowed_schemes=frozenset({"https"}),
+        allowed_hosts=_OPENAI_ALLOWED_HOSTS,
+    )
     payload = _post_multipart(
         _join_url(provider["base_url"], "audio/transcriptions"),
         headers={"Authorization": f"Bearer {provider['secret_value']}"},
@@ -2321,7 +2347,7 @@ def _post_multipart(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with _open_provider_request(request, timeout=60) as response:
             return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
@@ -2354,6 +2380,45 @@ _PRIVATE_HOSTS = frozenset({
     "metadata.google.internal",
     "metadata.google.com",
 })
+
+
+class _NoProviderRedirect(urllib.request.HTTPRedirectHandler):
+    """Fail closed instead of forwarding provider credentials across redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_provider_request(request: urllib.request.Request, *, timeout: int):
+    opener = urllib.request.build_opener(_NoProviderRedirect())
+    return opener.open(request, timeout=timeout)
+
+
+def _validate_credential_endpoint(
+    url: str,
+    *,
+    label: str,
+    allowed_schemes: frozenset[str],
+    allowed_hosts: frozenset[str],
+) -> None:
+    """Validate an endpoint before attaching a provider credential."""
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower().rstrip(".")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{label} must use a valid network port.") from exc
+    if not host or host not in allowed_hosts:
+        raise ValueError(f"{label} host is not in the permitted allowlist.")
+    if scheme not in allowed_schemes:
+        raise ValueError(f"{label} must use a secure permitted scheme.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"{label} must not include URL credentials.")
+    if port not in {None, 443}:
+        raise ValueError(f"{label} must use the default TLS port.")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"{label} must not include a query or fragment.")
 
 
 def _validate_outbound_url(url: str) -> None:

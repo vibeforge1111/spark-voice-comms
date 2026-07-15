@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from voice_comms_chip.spark_hook import (
+    _NoProviderRedirect,
     _openai_realtime_ws_url,
     _synthesize_with_openai_realtime,
     _transcribe_with_provider,
@@ -102,3 +103,9 @@ def test_openai_realtime_disables_credential_forwarding_redirects() -> None:
             )
 
     assert captured["redirect_limit"] == 0
+
+
+def test_http_provider_transport_disables_credential_forwarding_redirects() -> None:
+    handler = _NoProviderRedirect()
+
+    assert handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example") is None

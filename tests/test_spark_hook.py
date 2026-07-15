@@ -1221,7 +1221,7 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
         return _FakeBinaryHttpResponse(json.dumps({"text": "/voice plan"}).encode("utf-8"))
 
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=fake_urlopen,
     ):
         result = handle_voice_transcribe_hook(payload)
@@ -1258,7 +1258,7 @@ def test_voice_transcribe_auto_requires_local_faster_whisper_when_local_is_unava
     )
 
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=AssertionError("hosted transcription should require explicit provider opt-in"),
     ):
         with pytest.raises(ValueError, match="Local faster-whisper transcription is the default"):
@@ -1392,7 +1392,7 @@ def test_voice_transcribe_prefers_local_faster_whisper_without_openai_call_when_
         "voice_comms_chip.spark_hook._transcribe_with_local_faster_whisper",
         return_value="Local first transcript",
     ), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=AssertionError("hosted transcription should not be called"),
     ):
         result = handle_voice_transcribe_hook(
@@ -1424,7 +1424,7 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
         encoding="utf-8",
     )
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=RuntimeError("simulated provider outage"),
     ):
         result = handle_voice_transcribe_hook(payload)
@@ -1447,7 +1447,7 @@ def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fai
         encoding="utf-8",
     )
     with patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=RuntimeError("simulated provider outage"),
     ), patch(
         "voice_comms_chip.spark_hook._local_faster_whisper_available",
@@ -1539,7 +1539,7 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
         captured["headers"] = dict(request.header_items())
         return _FakeBinaryHttpResponse(json.dumps({"text": "Voice via dedicated provider"}).encode("utf-8"))
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_transcribe_hook(
             _authorized_voice_payload("voice.transcribe", {
                 "builder_env_file_path": str(env_file),
@@ -1590,7 +1590,7 @@ def test_voice_speak_uses_profile_default_elevenlabs_voice(tmp_path):
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
@@ -1639,7 +1639,7 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
@@ -2001,7 +2001,7 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
