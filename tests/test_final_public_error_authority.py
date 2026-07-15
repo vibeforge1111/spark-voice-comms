@@ -30,6 +30,14 @@ def test_deterministic_fallback_does_not_publish_provider_or_path_details():
     assert "not-a-real-secret" not in encoded
     assert "/Users/private" not in encoded
     assert "family-message.ogg" not in encoded
+    assert response["returncode"] == 1
+    assert response["stdout"] == ""
+    assert response["result"]["transcript_text"] == ""
+    assert response["result"]["usable_transcript"] is False
+    assert response["stderr"] == (
+        "I couldn't transcribe that voice note because voice transcription is unavailable. "
+        "Please try again once voice is ready."
+    )
     assert response["result"]["fallback_reason"] == "Transcription provider unavailable."
 
 
@@ -40,10 +48,13 @@ def test_fallback_transcript_keeps_helpful_generic_reason():
         reason="filesystem and provider details",
     )
 
-    assert "voice input" in transcript
-    assert "Transcription provider unavailable." in transcript
+    assert transcript == (
+        "I couldn't transcribe that voice note because voice transcription is unavailable. "
+        "Please try again once voice is ready."
+    )
     assert "private-message.ogg" not in transcript
     assert "filesystem and provider details" not in transcript
+    assert "Deterministic fallback transcript" not in transcript
 
 
 @pytest.mark.parametrize(
