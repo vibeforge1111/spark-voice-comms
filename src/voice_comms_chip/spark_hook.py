@@ -10,16 +10,19 @@ import io
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import ssl
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import wave
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -88,6 +91,8 @@ MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
 MAX_WEBSOCKET_MESSAGE_BYTES = 10 * 1024 * 1024         # 10 MB per message
 MAX_REALTIME_AUDIO_BYTES = 100 * 1024 * 1024           # 100 MB per response
 MAX_TTS_TEXT_BYTES = 100_000
+PYTTSX3_RUNANDWAIT_TIMEOUT_SECONDS = 60.0
+ELEVENLABS_VOICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -979,6 +984,17 @@ def handle_voice_transcribe_hook(payload: dict[str, Any]) -> dict[str, Any]:
                 },
             }, payload=payload, audio_bytes=len(audio_bytes), started_at=transcribe_started)
     if transcription_mode in {"auto", "local"}:
+        if fallback_mode == "deterministic":
+            return _with_transcribe_runtime_state(
+                _deterministic_transcribe_response(
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    reason=PUBLIC_TRANSCRIPTION_FAILURE_REASON,
+                ),
+                payload=payload,
+                audio_bytes=len(audio_bytes),
+                started_at=transcribe_started,
+            )
         raise ValueError(
             "Local faster-whisper transcription is the default Telegram voice path, but `faster_whisper` is not installed. "
             "Install `spark-voice-comms[local-stt]`, or set VOICE_TRANSCRIBE_PROVIDER=openai to explicitly opt into hosted transcription."
@@ -1246,6 +1262,15 @@ def _local_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
             "status": "ready via Kokoro local neural TTS",
         }
     if _local_kokoro_package_available():
+        if _local_pyttsx3_available():
+            return {
+                "ready": True,
+                "provider": LOCAL_TTS_PROVIDER,
+                "status": (
+                    "ready via pyttsx3 basic system TTS; Kokoro is installed "
+                    f"but still needs {ENV_KOKORO_MODEL_PATH} and {ENV_KOKORO_VOICES_PATH}"
+                ),
+            }
         return {
             "ready": False,
             "provider": LOCAL_KOKORO_TTS_PROVIDER,
@@ -1759,11 +1784,35 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
         "file_extension": file_extension,
         "voice_compatible": voice_compatible,
         "voice_settings": {
-            "stability": provided_voice_settings.get("stability", 0.92),
-            "similarity_boost": provided_voice_settings.get("similarity_boost", 0.78),
-            "style": provided_voice_settings.get("style", 0.03),
+            "stability": _bounded_voice_float(
+                provided_voice_settings.get("stability"),
+                default=0.92,
+                minimum=0.0,
+                maximum=1.0,
+                setting_name="tts.voice_settings.stability",
+            ),
+            "similarity_boost": _bounded_voice_float(
+                provided_voice_settings.get("similarity_boost"),
+                default=0.78,
+                minimum=0.0,
+                maximum=1.0,
+                setting_name="tts.voice_settings.similarity_boost",
+            ),
+            "style": _bounded_voice_float(
+                provided_voice_settings.get("style"),
+                default=0.03,
+                minimum=0.0,
+                maximum=1.0,
+                setting_name="tts.voice_settings.style",
+            ),
             "use_speaker_boost": provided_voice_settings.get("use_speaker_boost", True),
-            "speed": provided_voice_settings.get("speed", speech.get("default_rate", 1.0)),
+            "speed": _bounded_voice_float(
+                provided_voice_settings.get("speed", speech.get("default_rate")),
+                default=1.0,
+                minimum=0.5,
+                maximum=2.0,
+                setting_name="tts.voice_settings.speed",
+            ),
         },
     }
 
@@ -1935,6 +1984,22 @@ def _resolve_optional_float(value: Any, *, setting_name: str | None = None) -> f
         return None
 
 
+def _bounded_voice_float(
+    value: Any,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+    setting_name: str,
+) -> float:
+    if value is None or str(value).strip() == "":
+        return default
+    resolved = _resolve_optional_float(value, setting_name=setting_name)
+    if resolved is None:
+        return default
+    return max(minimum, min(maximum, resolved))
+
+
 def _validate_elevenlabs_base_url(base_url: str) -> None:
     _validate_credential_endpoint(
         base_url,
@@ -1953,6 +2018,8 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
     _validate_elevenlabs_base_url(str(request["base_url"]))
     retried_with_fallback = False
     while True:
+        if not ELEVENLABS_VOICE_ID_PATTERN.fullmatch(voice_id):
+            raise ValueError("ElevenLabs voice_id must contain only letters, numbers, and hyphens.")
         base_url = _join_url(request["base_url"], f"text-to-speech/{voice_id}")
         query = {"optimize_streaming_latency": "2"}
         output_format = str(request.get("output_format") or "").strip()
@@ -1989,7 +2056,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
                     voice_id = fallback_voice_id
                     retried_with_fallback = True
                     continue
-            raise RuntimeError(f"ElevenLabs TTS request failed with HTTP {exc.code}.") from exc
+            raise RuntimeError(_provider_http_error_message(exc.code)) from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"ElevenLabs TTS network error: {exc.reason}") from exc
 
@@ -1999,10 +2066,8 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
         pyttsx3 = importlib.import_module("pyttsx3")
     except ImportError as exc:
         raise RuntimeError("Local TTS requires optional package `pyttsx3`. Install it, then retry.") from exc
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
-            temp_path = handle.name
+    with tempfile.TemporaryDirectory(prefix="spark-tts-") as temp_dir:
+        temp_path = Path(temp_dir) / "output.wav"
         engine = pyttsx3.init()
         rate = request.get("rate")
         if rate is not None:
@@ -2018,26 +2083,53 @@ def _synthesize_with_pyttsx3(*, request: dict[str, Any]) -> tuple[bytes, str]:
                 if voice_name in name or voice_name in voice_id.lower():
                     engine.setProperty("voice", voice_id)
                     break
-        engine.save_to_file(request["text"], temp_path)
-        engine.runAndWait()
-        audio_bytes = Path(temp_path).read_bytes()
+        engine.save_to_file(request["text"], str(temp_path))
+        run_done = threading.Event()
+        run_errors: list[BaseException] = []
+
+        def _run_blocking() -> None:
+            try:
+                engine.runAndWait()
+            except BaseException as exc:
+                run_errors.append(exc)
+            finally:
+                run_done.set()
+
+        run_thread = threading.Thread(
+            target=_run_blocking,
+            name="spark-pyttsx3-runandwait",
+            daemon=True,
+        )
+        run_thread.start()
+        if not run_done.wait(timeout=PYTTSX3_RUNANDWAIT_TIMEOUT_SECONDS):
+            try:
+                engine.stop()
+            except (OSError, RuntimeError):
+                pass
+            raise RuntimeError(
+                f"Local pyttsx3 TTS exceeded the {PYTTSX3_RUNANDWAIT_TIMEOUT_SECONDS:g}-second limit."
+            )
+        if run_errors:
+            raise run_errors[0]
+        audio_bytes = temp_path.read_bytes()
         if not audio_bytes:
             raise RuntimeError("Local pyttsx3 TTS returned empty audio.")
         return audio_bytes, str(request.get("voice_id") or "local-system-voice")
-    finally:
-        if temp_path:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
 
 
 def _synthesize_with_kokoro(*, request: dict[str, Any]) -> tuple[bytes, str]:
     try:
         kokoro_module = importlib.import_module("kokoro_onnx")
+    except ImportError as exc:
+        raise RuntimeError(
+            "Kokoro TTS requires optional package `kokoro-onnx`. Install it, then retry."
+        ) from exc
+    try:
         soundfile = importlib.import_module("soundfile")
     except ImportError as exc:
-        raise RuntimeError("Kokoro TTS requires optional packages `kokoro-onnx` and `soundfile`. Install them, then retry.") from exc
+        raise RuntimeError(
+            "Kokoro TTS requires optional package `soundfile` for WAV output. Install it, then retry."
+        ) from exc
     raw_model_path = str(request.get("model_path") or "").strip()
     raw_voices_path = str(request.get("voices_path") or "").strip()
     if not raw_model_path:
@@ -2362,21 +2454,26 @@ def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
     return 5
 
 
+@lru_cache(maxsize=2)
+def _load_local_whisper_model(model_size: str):
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model_size, device="cpu", compute_type="int8")
+
+
 def _transcribe_with_local_faster_whisper(
     *,
     payload: dict[str, Any],
     audio_bytes: bytes,
     filename: str,
 ) -> str:
-    from faster_whisper import WhisperModel
-
     suffix = Path(filename).suffix or ".wav"
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
             handle.write(audio_bytes)
             temp_path = handle.name
-        model = WhisperModel(_resolve_local_faster_whisper_model(payload), device="cpu", compute_type="int8")
+        model = _load_local_whisper_model(_resolve_local_faster_whisper_model(payload))
         transcribe_kwargs: dict[str, Any] = {
             "beam_size": _resolve_local_faster_whisper_beam_size(payload),
             "condition_on_previous_text": False,
@@ -2469,6 +2566,16 @@ def _read_error_body_bounded(exc: object) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _provider_http_error_message(code: int) -> str:
+    if code == 404:
+        return "Voice provider endpoint was not found. Check the configured base URL and model."
+    if code in {401, 403}:
+        return "Voice provider rejected its credential. Check the configured secret reference."
+    if code == 429:
+        return "Voice provider rate-limited the request. Retry later or use the approved local provider."
+    return f"Voice provider request failed with HTTP {code}."
+
+
 def _reject_multipart_crlf(label: str, value: str) -> None:
     if "\r" in value or "\n" in value:
         raise ValueError(f"{label} must not contain CR or LF characters")
@@ -2528,7 +2635,7 @@ def _post_multipart(
             return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
         _read_error_body_bounded(exc)
-        raise RuntimeError(f"Voice provider request failed with HTTP {exc.code}.") from exc
+        raise RuntimeError(_provider_http_error_message(exc.code)) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
