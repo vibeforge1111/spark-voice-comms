@@ -95,7 +95,7 @@ def test_provider_http_error_body_is_bounded_and_not_exposed() -> None:
     )
     with (
         patch.object(spark_hook, "_open_provider_request", side_effect=error),
-        pytest.raises(RuntimeError, match=r"failed with HTTP 401") as raised,
+        pytest.raises(RuntimeError, match=r"rejected its credential") as raised,
     ):
         spark_hook._post_multipart(
             "https://api.openai.com/v1/audio/transcriptions",
