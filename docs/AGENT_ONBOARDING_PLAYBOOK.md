@@ -130,14 +130,20 @@ Builder handles my thinking, memory, and character. The voice chip handles liste
 
 Useful Telegram checks:
 
+- `/voice status`
 - `/voice map`
 - `/voice provider`
 - `/voice dashboard`
+- `/voice speak Voice setup smoke test.`
 - `/probe voice`
 - `find me a natural geeky QA tester voice`
 - `audition the voice`
 - `make it warmer`
 - `go back to the previous voice`
+
+Treat readiness, synthesis, and delivery as separate proofs: check `/voice status`,
+request one short spoken reply, then send a short voice note and inspect `/probe voice`
+or `/voice dashboard` for Telegram delivery evidence.
 
 Avoid Telegram-facing replies like:
 

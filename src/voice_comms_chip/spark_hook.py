@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import socket
 import subprocess
 import ssl
 import sys
@@ -85,6 +86,8 @@ MAX_PROVIDER_AUDIO_RESPONSE_BYTES = 50 * 1024 * 1024  # 50 MB
 MAX_PROVIDER_JSON_RESPONSE_BYTES = 1 * 1024 * 1024    # 1 MB
 MAX_PROVIDER_ERROR_RESPONSE_BYTES = 64 * 1024          # 64 KB
 MAX_WEBSOCKET_MESSAGE_BYTES = 10 * 1024 * 1024         # 10 MB per message
+MAX_REALTIME_AUDIO_BYTES = 100 * 1024 * 1024           # 100 MB per response
+MAX_TTS_TEXT_BYTES = 100_000
 DEFAULT_KOKORO_VOICE = "af_sarah"
 DEFAULT_KOKORO_LANG = "en-us"
 VOICE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -443,7 +446,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
                         "Next: check the local package error, then rerun `/voice install kokoro`."
                     ),
                     "target": target,
-                    "python": sys.executable,
+                    "python": _python_runtime_label(),
                     "installed": False,
                     "already_installed": False,
                 },
@@ -461,7 +464,7 @@ def _install_kokoro(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             "reply_text": reply_text,
             "target": target,
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": is_ready,
             "already_installed": was_ready,
             "kokoro_ready": kokoro_ready,
@@ -499,7 +502,7 @@ def _install_faster_whisper() -> dict[str, Any]:
                         "Next: check the local package error, then rerun `/voice install faster-whisper`."
                     ),
                     "target": "faster-whisper",
-                    "python": sys.executable,
+                    "python": _python_runtime_label(),
                     "installed": False,
                     "already_installed": False,
                     "stt_ready": False,
@@ -515,7 +518,7 @@ def _install_faster_whisper() -> dict[str, Any]:
         "result": {
             "reply_text": _faster_whisper_install_reply_text(install_status=install_status, stt_ready=is_ready),
             "target": "faster-whisper",
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": is_ready,
             "already_installed": was_ready,
             "stt_ready": is_ready,
@@ -557,7 +560,7 @@ def _install_local_voice_stack(payload: dict[str, Any]) -> dict[str, Any]:
         "result": {
             "reply_text": "\n".join(reply_lines),
             "target": "local",
-            "python": sys.executable,
+            "python": _python_runtime_label(),
             "installed": bool(stt_ready and kokoro_installed),
             "stt_ready": stt_ready,
             "kokoro_installed": kokoro_installed,
@@ -1075,8 +1078,11 @@ def _build_voice_status(payload: dict[str, Any]) -> dict[str, Any]:
     if env_file_path:
         try:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            logger.debug(
+                "Builder env file unavailable during voice status (%s).",
+                type(exc).__name__,
+            )
     transcription_mode = _transcription_provider_mode(payload)
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
@@ -1549,6 +1555,8 @@ def _resolve_voice_local_file(
     resolved = Path(text).expanduser().resolve()
     if not any(resolved == root or resolved.is_relative_to(root) for root in roots):
         raise ValueError(f"Local path must be a file within {boundary_label}.")
+    if resolved.exists() and not resolved.is_file():
+        raise ValueError(f"Local path must point to a regular file within {boundary_label}.")
     if not resolved.is_file():
         raise ValueError(f"Local file was not found within {boundary_label}.")
     return resolved
@@ -1687,6 +1695,9 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
     text = str(payload.get("text") or "").strip()
     if not text:
         raise ValueError("voice.speak requires non-empty text.")
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > MAX_TTS_TEXT_BYTES:
+        raise ValueError(f"voice.speak text exceeds the {MAX_TTS_TEXT_BYTES}-byte limit.")
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
     tts_payload = payload.get("tts")
     tts = tts_payload if isinstance(tts_payload, dict) else {}
@@ -1781,7 +1792,10 @@ def _resolve_kokoro_tts_request(
         roots=asset_roots,
         boundary_label="approved voice asset roots",
     )
-    speed = _resolve_optional_float(tts.get("speed") or env_map.get(ENV_KOKORO_SPEED))
+    speed = _resolve_optional_float(
+        tts.get("speed") or env_map.get(ENV_KOKORO_SPEED),
+        setting_name=ENV_KOKORO_SPEED,
+    )
     if speed is None:
         speed = 1.0
     return {
@@ -1810,8 +1824,14 @@ def _resolve_local_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    rate = _resolve_optional_float(tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE))
-    volume = _resolve_optional_float(tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME))
+    rate = _resolve_optional_float(
+        tts.get("rate") or env_map.get(ENV_LOCAL_TTS_RATE),
+        setting_name=ENV_LOCAL_TTS_RATE,
+    )
+    volume = _resolve_optional_float(
+        tts.get("volume") or env_map.get(ENV_LOCAL_TTS_VOLUME),
+        setting_name=ENV_LOCAL_TTS_VOLUME,
+    )
     voice_name = str(tts.get("voice_name") or env_map.get(ENV_LOCAL_TTS_VOICE_NAME) or "").strip()
     return {
         "provider_id": LOCAL_TTS_PROVIDER,
@@ -1845,10 +1865,16 @@ def _resolve_openai_realtime_tts_request(
     secret_value = env_map.get(secret_env_ref)
     if not secret_value:
         raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
-    timeout_seconds = _resolve_optional_float(tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS))
+    timeout_seconds = _resolve_optional_float(
+        tts.get("timeout_seconds") or env_map.get(ENV_OPENAI_REALTIME_TIMEOUT_SECONDS),
+        setting_name=ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
+    )
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_OPENAI_REALTIME_TIMEOUT_SECONDS
-    sample_rate = int(_resolve_optional_float(tts.get("sample_rate")) or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE)
+    sample_rate = int(
+        _resolve_optional_float(tts.get("sample_rate"), setting_name="tts.sample_rate")
+        or DEFAULT_OPENAI_REALTIME_SAMPLE_RATE
+    )
     model_id = str(
         tts.get("model_id") or env_map.get(ENV_OPENAI_REALTIME_MODEL_ID) or DEFAULT_OPENAI_REALTIME_MODEL_ID
     ).strip() or DEFAULT_OPENAI_REALTIME_MODEL_ID
@@ -1887,7 +1913,7 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
     )
 
 
-def _resolve_optional_float(value: Any) -> float | None:
+def _resolve_optional_float(value: Any, *, setting_name: str | None = None) -> float | None:
     text = "" if value is None else str(value).strip()
     if not text:
         return None
@@ -1895,9 +1921,17 @@ def _resolve_optional_float(value: Any) -> float | None:
         result = float(text)
         # Reject NaN and Inf — they propagate through min/max and cause crashes
         if result != result or abs(result) == float("inf"):
+            logger.warning(
+                "Ignored non-finite %s; using the provider default.",
+                setting_name or "voice numeric setting",
+            )
             return None
         return result
     except (ValueError, OverflowError):
+        logger.warning(
+            "Ignored unparseable %s; using the provider default.",
+            setting_name or "voice numeric setting",
+        )
         return None
 
 
@@ -1947,7 +1981,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
                 raise RuntimeError("ElevenLabs returned empty audio.")
             return audio_bytes, voice_id
         except urllib.error.HTTPError as exc:
-            detail = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode("utf-8", errors="ignore") if exc.fp else str(exc)
+            detail = _read_error_body_bounded(exc) if exc.fp else ""
             is_not_found = "voice_not_found" in detail.lower()
             if is_not_found and not retried_with_fallback:
                 fallback_voice_id = _resolve_elevenlabs_fallback_voice_id(request=request)
@@ -1955,7 +1989,7 @@ def _synthesize_with_elevenlabs(*, request: dict[str, Any]) -> tuple[bytes, str]
                     voice_id = fallback_voice_id
                     retried_with_fallback = True
                     continue
-            raise RuntimeError(f"ElevenLabs TTS request failed: {detail or exc}") from exc
+            raise RuntimeError(f"ElevenLabs TTS request failed with HTTP {exc.code}.") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"ElevenLabs TTS network error: {exc.reason}") from exc
 
@@ -2067,6 +2101,7 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
     )
     audio_chunks: list[bytes] = []
     fallback_audio_chunks: list[bytes] = []
+    audio_bytes_received = 0
     raw_instructions = str(request.get("instructions") or "")
     if raw_instructions and request.get("instructions_authority") != "voice-style-boundary-v1":
         bounded_instructions = _openai_realtime_tts_instructions(raw_instructions)
@@ -2118,8 +2153,23 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 }
             )
         )
+        deadline = time.monotonic() + timeout
         while True:
-            raw_message = ws.recv()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS timed out after {timeout:g}s waiting for completion."
+                )
+            try:
+                ws.settimeout(remaining)
+            except (AttributeError, OSError):
+                pass
+            try:
+                raw_message = ws.recv()
+            except socket.timeout as exc:
+                raise RuntimeError(
+                    f"OpenAI Realtime TTS timed out after {timeout:g}s waiting for completion."
+                ) from exc
             if not raw_message:
                 continue
             # Defensive second line of defense behind the connect-time max_size:
@@ -2143,12 +2193,20 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
             if event_type == "response.output_audio.delta":
                 delta = str(event.get("delta") or "")
                 if delta:
-                    audio_chunks.append(base64.b64decode(delta.encode("ascii")))
+                    chunk = base64.b64decode(delta.encode("ascii"))
+                    audio_bytes_received += len(chunk)
+                    if audio_bytes_received > MAX_REALTIME_AUDIO_BYTES:
+                        raise RuntimeError("OpenAI Realtime TTS exceeded the audio response limit.")
+                    audio_chunks.append(chunk)
             elif event_type == "response.content_part.done":
                 part = event.get("part") if isinstance(event.get("part"), dict) else {}
                 audio = str(part.get("audio") or "")
                 if audio:
-                    fallback_audio_chunks.append(base64.b64decode(audio.encode("ascii")))
+                    chunk = base64.b64decode(audio.encode("ascii"))
+                    audio_bytes_received += len(chunk)
+                    if audio_bytes_received > MAX_REALTIME_AUDIO_BYTES:
+                        raise RuntimeError("OpenAI Realtime TTS exceeded the audio response limit.")
+                    fallback_audio_chunks.append(chunk)
             elif event_type == "response.done":
                 break
     finally:
@@ -2401,6 +2459,16 @@ def _read_response_bounded(response, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+def _read_error_body_bounded(exc: object) -> str:
+    try:
+        raw = exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES)  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return ""
+    if not isinstance(raw, bytes):
+        return ""
+    return raw.decode("utf-8", errors="replace")
+
+
 def _reject_multipart_crlf(label: str, value: str) -> None:
     if "\r" in value or "\n" in value:
         raise ValueError(f"{label} must not contain CR or LF characters")
@@ -2459,7 +2527,8 @@ def _post_multipart(
         with _open_provider_request(request, timeout=60) as response:
             return _read_response_bounded(response, max_bytes=MAX_PROVIDER_JSON_RESPONSE_BYTES)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Voice provider HTTP {exc.code}: {exc.read(MAX_PROVIDER_ERROR_RESPONSE_BYTES).decode('utf-8', errors='replace')}") from exc
+        _read_error_body_bounded(exc)
+        raise RuntimeError(f"Voice provider request failed with HTTP {exc.code}.") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Voice provider network error: {exc.reason}") from exc
 
