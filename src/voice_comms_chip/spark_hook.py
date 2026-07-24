@@ -1194,7 +1194,11 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             env_map.update({key: value for key, value in _read_env_map(env_file_path=env_file_path).items() if value})
             env_note = "Builder env file read"
         except Exception as exc:
-            env_note = f"Builder env file unavailable: {exc}"
+            logger.warning(
+                "Builder env file unavailable during onboarding (%s).",
+                type(exc).__name__,
+            )
+            env_note = "Builder env file unavailable"
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
     local_tts_ready = local_tts_status["ready"]
@@ -2153,6 +2157,10 @@ def _synthesize_with_openai_realtime(*, request: dict[str, Any]) -> tuple[bytes,
                 break
     finally:
         ws.close()
+    if not audio_chunks and fallback_audio_chunks:
+        logger.debug(
+            "OpenAI Realtime used content_part.done audio because delta audio was empty."
+        )
     pcm_audio = b"".join(audio_chunks or fallback_audio_chunks)
     if not pcm_audio:
         raise RuntimeError("OpenAI Realtime TTS returned empty audio.")
@@ -2282,6 +2290,11 @@ def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
             return True
         if configured in {"0", "false", "no", "off"}:
             return False
+        if configured:
+            logger.warning(
+                "Ignored unrecognized VOICE_TRANSCRIBE_LOCAL_VAD_FILTER value; "
+                "using the safe default true."
+            )
     return True
 
 
@@ -2874,12 +2887,40 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--verbose", action="store_true", help="Enable debug diagnostics")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Check voice.status readiness without exporting runtime state",
+    )
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    if args.dry_run and args.hook != "voice.status":
+        parser.error("--dry-run is supported only for voice.status")
 
     try:
         payload = _load_hook_payload(Path(args.input), hook=args.hook)
         if args.hook == "voice.status":
-            result = handle_voice_status_hook(payload)
+            if args.dry_run:
+                status = _build_voice_status(payload)
+                result = {
+                    "returncode": 0,
+                    "stdout": "dry_run_ready" if status.get("ready") else "dry_run_not_ready",
+                    "stderr": "",
+                    "metrics": {
+                        "ready": 1 if status.get("ready") else 0,
+                        "dry_run": 1,
+                    },
+                    "result": {
+                        "ready": bool(status.get("ready")),
+                        "reason": str(status.get("reason") or ""),
+                        "dry_run": True,
+                    },
+                }
+            else:
+                result = handle_voice_status_hook(payload)
         elif args.hook == "voice.plan":
             result = handle_voice_plan_hook(payload)
         elif args.hook == "voice.onboard":
@@ -2894,7 +2935,8 @@ def main() -> int:
         _write_output(Path(args.output), _hook_error_payload(exc))
         return 1
 
-    _export_runtime_state_if_configured(result)
+    if not args.dry_run:
+        _export_runtime_state_if_configured(result)
     _write_output(Path(args.output), result)
     return 0
 

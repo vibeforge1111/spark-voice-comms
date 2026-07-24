@@ -1,6 +1,6 @@
 [module]
 name = "spark-voice-comms"
-version = "0.1.0"
+version = "0.1.1"
 kind = "chip-pack"
 plane = "runtime"
 description = "Speech I/O chip for Spark voice transcription, provider onboarding, and spoken replies."
