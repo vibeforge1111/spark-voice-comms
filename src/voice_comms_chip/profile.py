@@ -66,7 +66,7 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     target = _validate_profile_path(target)
     
     try:
-        raw = target.read_text(encoding="utf-8")
+        raw = target.read_text(encoding="utf-8-sig")
     except FileNotFoundError as exc:
         raise RuntimeError(
             "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
@@ -76,7 +76,8 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"Voice profile at '{target}' contains invalid JSON. "
+            f"Voice profile at '{target}' contains invalid JSON "
+            f"(line {exc.lineno}, column {exc.colno}: {exc.msg}). "
             "Reinstall the voice-comms chip or fix the profile file."
         ) from exc
     if not isinstance(payload, dict):

@@ -1436,8 +1436,6 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
             allowed_schemes=frozenset({"https"}),
             allowed_hosts=_OPENAI_ALLOWED_HOSTS,
         )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice transcription.")
     if not secret_env_ref:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
@@ -1446,7 +1444,7 @@ def _resolve_provider(payload: dict[str, Any]) -> dict[str, str]:
         secret_env_ref,
         context=f"Active provider '{provider_id or provider_kind or 'unknown'}'",
     )
-    secret_value = _read_env_value(env_file_path=env_file_path, key=secret_env_ref)
+    secret_value = _runtime_env_map(env_file_path=env_file_path or None).get(secret_env_ref)
     if not secret_value:
         raise ValueError(
             _missing_voice_secret_message(f"Active provider '{provider_id or provider_kind or 'unknown'}'")
@@ -1712,8 +1710,6 @@ def _resolve_tts_request(payload: dict[str, Any], *, profile: dict[str, Any]) ->
             f"voice.speak does not yet support provider {provider_id!r}. "
             f"Supported provider_id values: {', '.join(supported_providers)}."
         )
-    if not env_file_path:
-        raise ValueError("Builder did not provide an env file path for voice synthesis.")
     auth_method = str(tts.get("auth_method") or "api_key_env").strip() or "api_key_env"
     if auth_method != "api_key_env":
         raise ValueError(f"voice.speak uses unsupported auth method '{auth_method}'.")
@@ -1892,7 +1888,7 @@ def _openai_realtime_tts_instructions(style_instructions: str) -> str:
 
 
 def _resolve_optional_float(value: Any) -> float | None:
-    text = str(value or "").strip()
+    text = "" if value is None else str(value).strip()
     if not text:
         return None
     try:
@@ -2263,52 +2259,48 @@ def _local_kokoro_ready(*, env_map: dict[str, str]) -> bool:
 
 def _resolve_local_faster_whisper_model(payload: dict[str, Any]) -> str:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
-        if configured:
-            return configured
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_MODEL") or "").strip()
+    if configured:
+        return configured
     return "tiny"
 
 
 def _resolve_local_faster_whisper_language(payload: dict[str, Any]) -> str | None:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
-        if configured:
-            return configured
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_LANGUAGE") or "").strip()
+    if configured:
+        return configured
     return None
 
 
 def _resolve_local_faster_whisper_vad_filter(payload: dict[str, Any]) -> bool:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
-        if configured in {"1", "true", "yes", "on"}:
-            return True
-        if configured in {"0", "false", "no", "off"}:
-            return False
-        if configured:
-            logger.warning(
-                "Ignored unrecognized VOICE_TRANSCRIBE_LOCAL_VAD_FILTER value; "
-                "using the safe default true."
-            )
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_VAD_FILTER") or "").strip().lower()
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    if configured in {"0", "false", "no", "off"}:
+        return False
+    if configured:
+        logger.warning(
+            "Ignored unrecognized VOICE_TRANSCRIBE_LOCAL_VAD_FILTER value; "
+            "using the safe default true."
+        )
     return True
 
 
 def _resolve_local_faster_whisper_beam_size(payload: dict[str, Any]) -> int:
     env_file_path = str(payload.get("builder_env_file_path") or "").strip()
-    if env_file_path:
-        env_map = _runtime_env_map(env_file_path=env_file_path)
-        configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
-        if configured:
-            try:
-                return max(1, int(configured))
-            except ValueError:
-                import sys as _sys
-                _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
+    env_map = _runtime_env_map(env_file_path=env_file_path or None)
+    configured = str(env_map.get("VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE") or "").strip()
+    if configured:
+        try:
+            return max(1, int(configured))
+        except ValueError:
+            import sys as _sys
+            _sys.stderr.write("[spark-voice-comms] invalid VOICE_TRANSCRIBE_LOCAL_BEAM_SIZE: configured value is not a valid integer; using default beam size 5\n")
     return 5
 
 
@@ -2936,9 +2928,16 @@ def main() -> int:
         return 1
 
     if not args.dry_run:
-        _export_runtime_state_if_configured(result)
+        try:
+            _export_runtime_state_if_configured(result)
+        except OSError as exc:
+            logger.warning("Voice runtime-state export failed; preserving hook output: %s", exc)
     _write_output(Path(args.output), result)
-    return 0
+    try:
+        result_returncode = int(result.get("returncode", 0)) if isinstance(result, dict) else 0
+    except (TypeError, ValueError):
+        result_returncode = 0
+    return 1 if result_returncode != 0 else 0
 
 
 if __name__ == "__main__":
