@@ -204,7 +204,7 @@ def _normalize_stt(stt: dict[str, Any]) -> dict[str, Any]:
         "provider_id": str(stt.get("provider_id") or "none"),
         "provider_kind": str(stt.get("provider_kind") or "unknown"),
         "mode": str(stt.get("mode") or "unknown"),
-        "ready": bool(stt.get("ready")),
+        "ready": coerce_bool(stt.get("ready")),
         "model": _optional_string(stt.get("model")),
         "last_probe_ref": _optional_string(stt.get("last_probe_ref")),
         "last_failure_reason": _safe_reason(stt.get("last_failure_reason")),
@@ -218,13 +218,13 @@ def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider_id": str(tts.get("provider_id") or "none"),
         "mode": str(tts.get("mode") or "unknown"),
-        "ready": bool(tts.get("ready")),
+        "ready": coerce_bool(tts.get("ready")),
         "voice_name": _optional_string(tts.get("voice_name")),
         "voice_id_masked": mask_identifier(voice_id),
         "voice_id_fingerprint": fingerprint(voice_id),
         "model_id": _optional_string(tts.get("model_id")),
         "mime_type": _optional_string(tts.get("mime_type")),
-        "voice_compatible": bool(tts.get("voice_compatible")),
+        "voice_compatible": coerce_bool(tts.get("voice_compatible")),
         "audio_bytes": int(tts.get("audio_bytes") or 0),
         "settings_fingerprint": fingerprint(settings),
         "last_probe_ref": _optional_string(tts.get("last_probe_ref")),
@@ -235,7 +235,7 @@ def _normalize_tts(tts: dict[str, Any]) -> dict[str, Any]:
 def _normalize_telegram_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
     status = str(delivery.get("last_send_voice_status") or delivery.get("status") or "unknown")
     return {
-        "ready": bool(delivery.get("ready") or status == "success"),
+        "ready": coerce_bool(delivery.get("ready")) or status == "success",
         "last_send_voice_at": _optional_string(delivery.get("last_send_voice_at")),
         "last_send_voice_status": status,
         "last_failure_reason": _safe_reason(delivery.get("last_failure_reason") or delivery.get("failure_reason")),
@@ -263,7 +263,7 @@ def _claim_levels(
     tts: dict[str, Any],
     delivery: dict[str, Any],
 ) -> dict[str, bool]:
-    configured = stt["provider_id"] != "none" or tts["provider_id"] != "none"
+    configured = stt.get("provider_id", "none") != "none" or tts.get("provider_id", "none") != "none"
     synthesis_ready = bool(tts["ready"])
     delivery_ready = bool(delivery["ready"])
     conversation_ready = bool(stt["ready"] and synthesis_ready and delivery_ready)
@@ -343,6 +343,21 @@ def _safe_reason(value: Any) -> str:
 
 def _optional_string(value: Any) -> str:
     return str(value or "").strip()
+
+
+def coerce_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        return default
+    if value is None:
+        return default
+    return bool(value)
 
 
 def _nonnegative_int(value: Any) -> int:
