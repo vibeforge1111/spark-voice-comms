@@ -61,6 +61,40 @@ def test_status_state_does_not_claim_delivery_from_transcription_readiness():
     assert state["claim_levels"]["conversation_ready"] is False
 
 
+def test_status_state_redacts_trace_context_and_marks_proof_boundary():
+    state = state_from_status(
+        status={
+            "ready": True,
+            "local_ready": False,
+            "provider_id": "openai",
+            "provider_kind": "openai",
+            "model": "whisper-1",
+        },
+        profile_summary={"profile_name": "spark_core"},
+        payload={
+            "surface": "telegram",
+            "request_id": "raw-telegram-request-123",
+            "trace_ref": "trace:sha256:ABCDEF1234567890",
+            "trace_context_scope": "telegram_voice_turn",
+        },
+    )
+    encoded = str(state)
+
+    assert state["request_ref"].startswith("request:sha256:")
+    assert state["trace_ref"] == "trace:sha256:abcdef1234567890"
+    assert state["trace_continuity"] == {
+        "request_joined": True,
+        "trace_joined": True,
+        "proof_joined": False,
+        "proof_storage": "missing",
+        "trace_context_scope": "telegram_voice_turn",
+        "proof_status": "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
+    assert "raw-telegram-request-123" not in encoded
+
+
 def test_speak_state_marks_synthesis_ready_without_stt_claim():
     state = state_from_speak(
         request={

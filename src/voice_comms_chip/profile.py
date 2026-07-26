@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +63,10 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
     target = Path(path) if path else DEFAULT_PROFILE_PATH
     
     # Validate path to prevent traversal attacks
-    _validate_profile_path(target)
+    target = _validate_profile_path(target)
     
     try:
-        raw = target.read_text(encoding="utf-8")
+        raw = target.read_text(encoding="utf-8-sig")
     except FileNotFoundError as exc:
         raise RuntimeError(
             "Voice profile not found. Reinstall the voice-comms chip, or pass a valid "
@@ -75,7 +76,8 @@ def load_voice_profile(path: str | None = None) -> dict[str, Any]:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            f"Voice profile at '{target}' contains invalid JSON. "
+            f"Voice profile at '{target}' contains invalid JSON "
+            f"(line {exc.lineno}, column {exc.colno}: {exc.msg}). "
             "Reinstall the voice-comms chip or fix the profile file."
         ) from exc
     if not isinstance(payload, dict):
@@ -111,3 +113,24 @@ def get_provider_voice_profile(profile: dict[str, Any], provider_id: str) -> dic
     )
     payload = provider_voices.get(provider_id)
     return payload if isinstance(payload, dict) else {}
+
+
+def main() -> int:
+    """Validate a local voice profile without starting the voice runtime."""
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Validate a voice profile JSON file")
+    parser.add_argument("--validate", metavar="PATH", required=True)
+    args = parser.parse_args()
+    try:
+        profile = load_voice_profile(args.validate)
+    except (RuntimeError, ValueError) as exc:
+        print(f"Profile invalid: {exc}", file=sys.stderr)
+        return 1
+    print(f"Profile valid: {profile.get('profile_name', 'unknown')}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

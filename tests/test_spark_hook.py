@@ -17,6 +17,7 @@ from voice_comms_chip.spark_hook import (
     _join_url,
     _write_output,
     assertNativeGovernorHarnessAuthority,
+    export_voice_runtime_state_for_spark_os,
     handle_voice_install_hook,
     handle_voice_onboard_hook,
     handle_voice_plan_hook,
@@ -70,6 +71,205 @@ def _payload(tmp_path, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def _voice_authority_payload():
+    envelope = _voice_policy()
+    return {
+        "turn_intent_envelope_vnext": envelope,
+        "governor_decision": _voice_governor_decision_from_envelope(envelope),
+    }
+
+
+def _media_transcribe_authority_payload(*, media_kind: str = "audio"):
+    envelope = _voice_policy()
+    for action in envelope["proposed_actions"]:
+        if action["action_id"] != "action:voice-transcribe":
+            continue
+        action["action_id"] = f"action:media-{media_kind}-transcribe"
+        action["capability_id"] = f"capability:spark-intelligence-builder:media.{media_kind}.transcribe"
+        action["summary"] = f"Transcribe Telegram {media_kind} media."
+        action["args_ref"]["id"] = f"artifact:media-{media_kind}-transcribe"
+        action["args_ref"]["path_or_uri"] = f"test://media/{media_kind}/transcribe"
+    return {
+        "turn_intent_envelope_vnext": envelope,
+        "governor_decision": _voice_governor_decision_from_envelope(envelope),
+    }
+
+
+def _voice_policy():
+    return {
+        "schema_version": "turn-intent-envelope-vnext",
+        "turn_id": "turn:voice-test",
+        "raw_turn_ref": {
+            "id": "trace:voice-test",
+            "redaction_class": "metadata_only",
+            "summary": "Voice test turn.",
+        },
+        "selected_move": "execute_action",
+        "freshness": {
+            "fresh_user_intent_present": True,
+            "stale_state_used_as_authority": False,
+            "memory_used_as_instruction": False,
+            "pending_state_used_as_authority": False,
+        },
+        "action_authority": {
+            "state": "executable",
+            "risk_tier": "medium",
+            "confidence": 0.95,
+            "requires_human_confirmation": False,
+            "reason": "Focused voice hook regression.",
+        },
+        "proposed_actions": [
+            {
+                "action_id": "action:voice-install",
+                "capability_id": "capability:spark-voice-comms:voice.install",
+                "action_type": "edit_file",
+                "risk_tier": "medium",
+                "summary": "Install local voice package.",
+                "args_ref": {
+                    "id": "artifact:voice-install",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/install",
+                    "redaction_class": "metadata_only",
+                    "summary": "Install args.",
+                },
+                "requires_confirmation": False,
+            },
+            {
+                "action_id": "action:voice-transcribe",
+                "capability_id": "capability:spark-voice-comms:voice.transcribe",
+                "action_type": "external_api_call",
+                "risk_tier": "medium",
+                "summary": "Transcribe voice media.",
+                "args_ref": {
+                    "id": "artifact:voice-transcribe",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/transcribe",
+                    "redaction_class": "metadata_only",
+                    "summary": "Transcribe args.",
+                },
+                "requires_confirmation": False,
+            },
+            {
+                "action_id": "action:voice-speak",
+                "capability_id": "capability:spark-voice-comms:voice.speak",
+                "action_type": "external_api_call",
+                "risk_tier": "medium",
+                "summary": "Synthesize voice reply.",
+                "args_ref": {
+                    "id": "artifact:voice-speak",
+                    "kind": "tool_args",
+                    "path_or_uri": "test://voice/speak",
+                    "redaction_class": "metadata_only",
+                    "summary": "Speak args.",
+                },
+                "requires_confirmation": False,
+            },
+        ],
+    }
+
+
+def _voice_governor_decision_from_envelope(envelope):
+    authorizations = []
+    ledgers = []
+    now = "2026-06-02T00:00:00Z"
+    for action in envelope["proposed_actions"]:
+        decision_id = f"decision:{action['action_id'].split(':', 1)[1]}"
+        authorization = {
+            "schema_version": "authorization-decision-v1",
+            "decision_id": decision_id,
+            "created_at": now,
+            "turn_id": envelope["turn_id"],
+            "action_id": action["action_id"],
+            "capability_id": action["capability_id"],
+            "verdict": "allow",
+            "risk_tier": action["risk_tier"],
+            "reasons": ["harness_core_authorized", "voice_governor_fixture"],
+            "evidence": [
+                {
+                    "id": "evidence:voice-test",
+                    "kind": "test_fixture",
+                    "summary": "Voice Governor fixture.",
+                    "redaction_class": "metadata_only",
+                }
+            ],
+            "approval": {"required": False, "status": "not_required"},
+            "restrictions": {
+                "network_allowed": action["action_type"] == "external_api_call",
+                "write_allowed": action["action_type"] != "read",
+                "publish_allowed": False,
+            },
+            "trace": {
+                "id": f"trace:{action['action_id'].split(':', 1)[1]}",
+                "summary": "Voice authorization trace.",
+                "redaction_class": "metadata_only",
+            },
+        }
+        authorizations.append(authorization)
+        ledgers.append(
+            {
+                "schema_version": "tool-call-ledger-v1",
+                "ledger_id": f"ledger:{action['action_id'].split(':', 1)[1]}",
+                "created_at": now,
+                "turn_id": envelope["turn_id"],
+                "action_id": action["action_id"],
+                "capability_id": action["capability_id"],
+                "tool_name": action["capability_id"].rsplit(":", 1)[-1],
+                "lifecycle": [
+                    {"stage": "propose", "at": now, "verdict": "passed", "summary": "Action proposed."},
+                    {"stage": "validate", "at": now, "verdict": "passed", "summary": "Arguments validated."},
+                    {"stage": "authorize", "at": now, "verdict": "passed", "summary": "Governor authorized."},
+                    {"stage": "execute", "at": now, "verdict": "pending", "summary": "Execution pending."},
+                ],
+                "authorization": authorization,
+                "arguments": {
+                    "schema_valid": True,
+                    "raw_ref": action["args_ref"],
+                    "sanitized_ref": action["args_ref"],
+                },
+                "result": {
+                    "status": "not_started",
+                    "summary": "Voice execution has not started.",
+                    "sanitized_output_ref": action["args_ref"],
+                },
+                "trace": authorization["trace"],
+            }
+        )
+    return {
+        "schema_version": "governor-decision-v1",
+        "decision_id": "governor-decision:voice-test",
+        "created_at": now,
+        "surface": "telegram",
+        "turn_id": envelope["turn_id"],
+        "selected_move": "execute_action",
+        "authority_state": "executable",
+        "risk_tier": "medium",
+        "outcome": "execute",
+        "envelope": envelope,
+        "authorizations": authorizations,
+        "tool_ledgers": ledgers,
+        "execution_boundary": {
+            "action_authorized": True,
+            "action_count": len(envelope["proposed_actions"]),
+            "authorized_action_count": len(authorizations),
+            "requires_human_confirmation": False,
+            "legacy_authority_demoted": True,
+            "reasons": ["harness_core_authorized"],
+        },
+        "reply_contract": {
+            "style": "human_conversational",
+            "instruction": "Execute the authorized voice action.",
+            "inspect_link_allowed": True,
+            "should_interrupt": False,
+        },
+        "evidence": authorizations[0]["evidence"],
+        "trace": {
+            "id": "trace:voice-governor-test",
+            "summary": "Voice Governor decision trace.",
+            "redaction_class": "metadata_only",
+        },
+    }
 
 
 def test_read_env_map_strips_matching_outer_quotes(tmp_path):
@@ -164,7 +364,11 @@ def test_voice_status_default_requires_local_faster_whisper(tmp_path):
 def test_voice_status_marks_custom_provider_as_unverified(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("CUSTOM_API_KEY=custom-test-key\n", encoding="utf-8")
-    with patch.dict("os.environ", {"VOICE_TRANSCRIBE_PROVIDER": "builder"}, clear=False), patch(
+    with patch.dict(
+        "os.environ",
+        {"VOICE_TRANSCRIBE_PROVIDER": "builder", "SPARK_VOICE_ALLOWED_SECRET_REFS": "CUSTOM_API_KEY"},
+        clear=False,
+    ), patch(
         "voice_comms_chip.spark_hook._local_faster_whisper_available",
         return_value=False,
     ):
@@ -205,7 +409,11 @@ def test_voice_status_reports_local_ready_before_custom_provider_warning(tmp_pat
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+    with patch.dict(
+        "os.environ",
+        {"SPARK_VOICE_ALLOWED_SECRET_REFS": "CUSTOM_API_KEY"},
+        clear=False,
+    ), patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
         "voice_comms_chip.spark_hook._local_kokoro_package_available",
         return_value=True,
     ):
@@ -425,6 +633,98 @@ def test_voice_install_kokoro_runs_local_pip_when_missing():
     assert "local setup step" in result["result"]["reply_text"]
     assert "VOICE_TTS_KOKORO_MODEL_PATH" not in result["result"]["reply_text"]
     assert "Python:" not in result["result"]["reply_text"]
+
+
+def test_voice_install_requires_explicit_target():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        try:
+            handle_voice_install_hook({})
+        except ValueError as exc:
+            assert "requires an explicit `target`" in str(exc)
+        else:  # pragma: no cover - defensive assertion
+            raise AssertionError("voice.install should require an explicit target")
+
+    run.assert_not_called()
+
+
+def test_voice_install_requires_governor_authority():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_install_hook({"target": "kokoro"})
+
+    run.assert_not_called()
+
+
+def test_voice_install_rejects_vnext_without_governor_authority():
+    with patch("voice_comms_chip.spark_hook.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_install_hook({"target": "kokoro", "turn_intent_envelope_vnext": _voice_policy()})
+
+    run.assert_not_called()
+
+
+def test_voice_transcribe_requires_governor_authority(tmp_path):
+    payload = {
+        "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        "filename": "telegram-voice.ogg",
+        "mime_type": "audio/ogg",
+        "builder_env_file_path": str(tmp_path / ".env"),
+    }
+    with patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("transcription should not run without Governor authority"),
+    ):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_voice_transcribe_accepts_media_audio_governor_authority(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._transcribe_with_local_faster_whisper",
+        return_value="Media audio transcript",
+    ):
+        result = handle_voice_transcribe_hook(
+            {
+                "audio_base64": base64.b64encode(b"fake-m4a-bytes").decode("ascii"),
+                "filename": "telegram-audio.m4a",
+                "mime_type": "audio/mp4",
+                "builder_env_file_path": str(env_file),
+                **_media_transcribe_authority_payload(media_kind="audio"),
+            }
+        )
+
+    assert result["returncode"] == 0
+    assert result["result"]["transcript_text"] == "Media audio transcript"
+    assert result["result"]["mode"] == "local_faster_whisper"
+
+
+def test_voice_transcribe_rejects_unrelated_media_governor_authority(tmp_path):
+    payload = {
+        "audio_base64": base64.b64encode(b"fake-ogg-bytes").decode("ascii"),
+        "filename": "telegram-voice.ogg",
+        "mime_type": "audio/ogg",
+        "builder_env_file_path": str(tmp_path / ".env"),
+        **_media_transcribe_authority_payload(media_kind="image"),
+    }
+    with patch(
+        "voice_comms_chip.spark_hook._local_faster_whisper_available",
+        side_effect=AssertionError("transcription should not run with unrelated media authority"),
+    ):
+        with pytest.raises(ValueError, match="matching Harness Core authorization and tool ledger"):
+            handle_voice_transcribe_hook(payload)
+
+
+def test_voice_speak_requires_governor_authority():
+    with patch.dict(sys.modules, {"pyttsx3": SimpleNamespace(init=AssertionError("tts should not run without Governor authority"))}):
+        with pytest.raises(ValueError, match="Harness Core Governor"):
+            handle_voice_speak_hook(
+                {
+                    "text": "Local free voice.",
+                    "tts": {"provider_id": "pyttsx3"},
+                }
+            )
 
 
 def test_voice_install_kokoro_skips_pip_when_already_installed():
@@ -748,9 +1048,143 @@ def test_cli_main_exports_sanitized_runtime_state(tmp_path):
     assert exported["schema_version"] == "spark.voice_runtime_state.v1"
     assert exported["stt"]["ready"] is True
     assert exported["telegram_delivery"]["ready"] is False
+    assert exported["request_ref"].startswith("request:sha256:")
+    assert exported["trace_ref"].startswith("trace:sha256:")
+    assert exported["trace_continuity"] == {
+        "request_joined": True,
+        "trace_joined": True,
+        "proof_joined": False,
+        "proof_storage": "missing",
+        "trace_context_scope": "configured_runtime_state_export",
+        "proof_status": "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
     assert "transcript_text" not in encoded
     assert "audio_base64" not in encoded
     assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_export_voice_runtime_state_for_spark_os_uses_spark_home(tmp_path):
+    spark_home = tmp_path / "spark-home"
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch.dict(
+        "os.environ",
+        {
+            "SPARK_HOME": str(spark_home),
+            "VOICE_TTS_ELEVENLABS_VOICE_ID": FAKE_ELEVENLABS_VOICE_ID,
+            "OPENAI_API_KEY": FAKE_OPENAI_KEY,
+        },
+        clear=True,
+    ):
+        result = export_voice_runtime_state_for_spark_os()
+
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    encoded = json.dumps(exported)
+    assert result["path"] == str(runtime_state_path)
+    assert exported["schema_version"] == "spark.voice_runtime_state.v1"
+    assert exported["surface"] == "spark_os_healthcheck"
+    assert exported["stt"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is False
+    assert exported["request_ref"].startswith("request:sha256:")
+    assert exported["trace_ref"].startswith("trace:sha256:")
+    assert exported["trace_continuity"] == {
+        "request_joined": True,
+        "trace_joined": True,
+        "proof_joined": False,
+        "proof_storage": "missing",
+        "trace_context_scope": "spark_os_healthcheck_export",
+        "proof_status": "not_execution_proof",
+        "raw_audio_exported": False,
+        "transcript_bodies_exported": False,
+    }
+    assert "spark_os_healthcheck_export:trace_context" in exported["source_ledger"]
+    assert "metadata only" in exported["redaction"]
+    assert FAKE_ELEVENLABS_VOICE_ID not in encoded
+    assert FAKE_OPENAI_KEY not in encoded
+
+
+def test_export_voice_runtime_state_for_spark_os_preserves_delivery_proof(tmp_path):
+    spark_home = tmp_path / "spark-home"
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "spark.voice_runtime_state.v1",
+                "telegram_delivery": {
+                    "ready": True,
+                    "last_send_voice_at": "2026-06-02T08:47:00Z",
+                    "last_send_voice_status": "success",
+                    "telegram_message_id_present": True,
+                },
+                "latency": {"send_voice_ms": 42, "total_ms": 99},
+                "source_ledger": ["voice.speak", "telegram-sendVoice-trace"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_tts_status",
+        return_value={"ready": True, "provider": "macos-say", "status": "ready via macOS say local system TTS"},
+    ), patch.dict("os.environ", {"SPARK_HOME": str(spark_home)}, clear=True):
+        result = export_voice_runtime_state_for_spark_os()
+
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    assert result["runtime_state"]["telegram_delivery"]["ready"] is True
+    assert exported["stt"]["ready"] is True
+    assert exported["tts"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["last_send_voice_status"] == "success"
+    assert exported["telegram_delivery"]["telegram_message_id_present"] is True
+    assert exported["latency"]["send_voice_ms"] == 42
+    assert exported["claim_levels"]["delivery_ready"] is True
+    assert exported["claim_levels"]["conversation_ready"] is True
+    assert "telegram-sendVoice-trace" in exported["source_ledger"]
+
+
+def test_export_voice_runtime_state_for_spark_os_preserves_audio_fallback_delivery_proof(tmp_path):
+    spark_home = tmp_path / "spark-home"
+    runtime_state_path = spark_home / "state" / "spark-voice-comms" / "voice-runtime-state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "spark.voice_runtime_state.v1",
+                "telegram_delivery": {
+                    "ready": True,
+                    "last_send_voice_at": "2026-06-02T09:17:38Z",
+                    "last_send_voice_status": "document_fallback",
+                    "telegram_message_id_present": True,
+                    "send_method": "sendAudio",
+                    "native_voice_message_ready": False,
+                },
+                "latency": {"send_voice_ms": 64, "total_ms": 121},
+                "source_ledger": ["voice.speak", "telegram-bot-voice-bridge"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=True), patch(
+        "voice_comms_chip.spark_hook._local_tts_status",
+        return_value={"ready": True, "provider": "macos-say", "status": "ready via macOS say local system TTS"},
+    ), patch.dict("os.environ", {"SPARK_HOME": str(spark_home)}, clear=True):
+        result = export_voice_runtime_state_for_spark_os()
+
+    exported = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    assert result["runtime_state"]["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["ready"] is True
+    assert exported["telegram_delivery"]["last_send_voice_status"] == "document_fallback"
+    assert exported["telegram_delivery"]["send_method"] == "sendAudio"
+    assert exported["telegram_delivery"]["native_voice_message_ready"] is False
+    assert exported["telegram_delivery"]["telegram_message_id_present"] is True
+    assert exported["latency"]["send_voice_ms"] == 64
+    assert exported["claim_levels"]["delivery_ready"] is True
+    assert exported["claim_levels"]["conversation_ready"] is True
+    assert "telegram-bot-voice-bridge" in exported["source_ledger"]
 
 
 def test_join_url_accepts_http_urls_and_trims_edges():
@@ -795,7 +1229,7 @@ def test_voice_transcribe_posts_openai_compatible_multipart_request(tmp_path):
         return _FakeBinaryHttpResponse(json.dumps({"text": "/voice plan"}).encode("utf-8"))
 
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=fake_urlopen,
     ):
         result = handle_voice_transcribe_hook(payload)
@@ -832,7 +1266,7 @@ def test_voice_transcribe_auto_requires_local_faster_whisper_when_local_is_unava
     )
 
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=AssertionError("hosted transcription should require explicit provider opt-in"),
     ):
         with pytest.raises(ValueError, match="Local faster-whisper transcription is the default"):
@@ -966,7 +1400,7 @@ def test_voice_transcribe_prefers_local_faster_whisper_without_openai_call_when_
         "voice_comms_chip.spark_hook._transcribe_with_local_faster_whisper",
         return_value="Local first transcript",
     ), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=AssertionError("hosted transcription should not be called"),
     ):
         result = handle_voice_transcribe_hook(
@@ -998,15 +1432,21 @@ def test_voice_transcribe_can_return_deterministic_fallback_when_requested(tmp_p
         encoding="utf-8",
     )
     with patch("voice_comms_chip.spark_hook._local_faster_whisper_available", return_value=False), patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=RuntimeError("simulated provider outage"),
     ):
         result = handle_voice_transcribe_hook(payload)
 
-    assert result["returncode"] == 0
+    assert result["returncode"] == 1
     assert result["result"]["mode"] == "deterministic_fallback"
-    assert "Deterministic fallback transcript" in result["result"]["transcript_text"]
-    assert "simulated provider outage" in result["result"]["fallback_reason"]
+    assert result["result"]["transcript_text"] == ""
+    assert result["result"]["usable_transcript"] is False
+    assert result["stderr"] == (
+        "I couldn't transcribe that voice note because voice transcription is unavailable. "
+        "Please try again once voice is ready."
+    )
+    assert result["result"]["fallback_reason"] == "Transcription provider unavailable."
+    assert "simulated provider outage" not in str(result)
 
 
 def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fails(tmp_path):
@@ -1021,7 +1461,7 @@ def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fai
         encoding="utf-8",
     )
     with patch(
-        "voice_comms_chip.spark_hook.urllib.request.urlopen",
+        "voice_comms_chip.spark_hook._open_provider_request",
         side_effect=RuntimeError("simulated provider outage"),
     ), patch(
         "voice_comms_chip.spark_hook._local_faster_whisper_available",
@@ -1038,7 +1478,8 @@ def test_voice_transcribe_can_fallback_to_local_faster_whisper_when_provider_fai
     assert result["result"]["mode"] == "local_faster_whisper"
     assert result["result"]["provider_id"] == "local_faster_whisper"
     assert result["result"]["transcript_text"] == "Local fallback transcript"
-    assert "simulated provider outage" in result["result"]["fallback_reason"]
+    assert result["result"]["fallback_reason"] == "Transcription provider unavailable."
+    assert "simulated provider outage" not in str(result)
 
 
 def test_local_faster_whisper_uses_configured_quality_settings(tmp_path):
@@ -1113,7 +1554,7 @@ def test_voice_transcribe_prefers_dedicated_openai_transcription_env_over_custom
         captured["headers"] = dict(request.header_items())
         return _FakeBinaryHttpResponse(json.dumps({"text": "Voice via dedicated provider"}).encode("utf-8"))
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_transcribe_hook(
             _authorized_voice_payload("voice.transcribe", {
                 "builder_env_file_path": str(env_file),
@@ -1164,7 +1605,7 @@ def test_voice_speak_uses_profile_default_elevenlabs_voice(tmp_path):
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
@@ -1213,7 +1654,7 @@ def test_voice_speak_uses_telegram_compatible_opus_for_telegram_surface(tmp_path
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
@@ -1575,7 +2016,7 @@ def test_voice_speak_retries_with_fallback_voice_when_primary_voice_is_missing(t
         encoding="utf-8",
     )
 
-    with patch("voice_comms_chip.spark_hook.urllib.request.urlopen", side_effect=fake_urlopen):
+    with patch("voice_comms_chip.spark_hook._open_provider_request", side_effect=fake_urlopen):
         result = handle_voice_speak_hook(
             _authorized_voice_payload("voice.speak", {
                 "builder_env_file_path": str(env_file),
