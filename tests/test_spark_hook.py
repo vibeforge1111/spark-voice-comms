@@ -15,6 +15,9 @@ import pytest
 from voice_comms_chip.spark_hook import (
     _build_speak_coherence,
     _join_url,
+    _process_voice_env_map,
+    _resolve_dedicated_transcription_provider,
+    _resolve_openai_realtime_tts_request,
     _write_output,
     assertNativeGovernorHarnessAuthority,
     export_voice_runtime_state_for_spark_os,
@@ -29,6 +32,7 @@ from voice_comms_chip.spark_hook import (
 )
 
 FAKE_OPENAI_KEY = "fake-openai-key-for-tests"
+FAKE_DEDICATED_OPENAI_KEY = "fake-dedicated-openai-key-for-tests"
 FAKE_ELEVENLABS_KEY = "fake-elevenlabs-key-for-tests"
 FAKE_ELEVENLABS_VOICE_ID = "fake-elevenlabs-voice-id"
 
@@ -71,6 +75,67 @@ def _payload(tmp_path, **overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_process_voice_env_map_accepts_dedicated_openai_voice_key(monkeypatch):
+    monkeypatch.setenv("VOICE_OPENAI_API_KEY", FAKE_DEDICATED_OPENAI_KEY)
+
+    assert _process_voice_env_map()["VOICE_OPENAI_API_KEY"] == FAKE_DEDICATED_OPENAI_KEY
+
+
+def test_hosted_openai_voice_defaults_prefer_dedicated_key(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"OPENAI_API_KEY={FAKE_OPENAI_KEY}",
+                f"VOICE_OPENAI_API_KEY={FAKE_DEDICATED_OPENAI_KEY}",
+                "VOICE_TRANSCRIBE_PROVIDER=openai",
+                "VOICE_TTS_PROVIDER=openai-realtime",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    transcription = _resolve_dedicated_transcription_provider(
+        {"builder_env_file_path": str(env_file)}
+    )
+    realtime = _resolve_openai_realtime_tts_request(
+        tts={},
+        env_map={
+            "OPENAI_API_KEY": FAKE_OPENAI_KEY,
+            "VOICE_OPENAI_API_KEY": FAKE_DEDICATED_OPENAI_KEY,
+        },
+        text="Dedicated key boundary.",
+        surface="telegram",
+    )
+
+    assert transcription is not None
+    assert transcription["secret_value"] == FAKE_DEDICATED_OPENAI_KEY
+    assert realtime["secret_value"] == FAKE_DEDICATED_OPENAI_KEY
+
+
+def test_hosted_openai_voice_keeps_legacy_standalone_key_compatibility(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"OPENAI_API_KEY={FAKE_OPENAI_KEY}\nVOICE_TRANSCRIBE_PROVIDER=openai\n",
+        encoding="utf-8",
+    )
+
+    transcription = _resolve_dedicated_transcription_provider(
+        {"builder_env_file_path": str(env_file)}
+    )
+    realtime = _resolve_openai_realtime_tts_request(
+        tts={},
+        env_map={"OPENAI_API_KEY": FAKE_OPENAI_KEY},
+        text="Legacy standalone compatibility.",
+        surface="telegram",
+    )
+
+    assert transcription is not None
+    assert transcription["secret_value"] == FAKE_OPENAI_KEY
+    assert realtime["secret_value"] == FAKE_OPENAI_KEY
 
 
 def _voice_authority_payload():

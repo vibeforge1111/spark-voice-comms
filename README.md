@@ -260,9 +260,9 @@ Voice env and local model paths are containment-checked. The checkout, `SPARK_HO
 Hosted STT is still supported when you explicitly want it:
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TRANSCRIBE_PROVIDER=openai
-VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_TRANSCRIBE_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 ```
 
@@ -318,7 +318,7 @@ python -m pip install -e ".[openai-realtime]"
 ```
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
