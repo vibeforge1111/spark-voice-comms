@@ -76,16 +76,16 @@ Spark's default STT mode is `auto`: use local faster-whisper for private, cost-s
 Hosted STT is still supported when you explicitly want it. Add provider settings to the local Builder environment file or secret layer. Do not commit this file.
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TRANSCRIBE_PROVIDER=openai
-VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_TRANSCRIBE_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 ```
 
 Supported STT path today:
 
 - local faster-whisper in default `auto` mode
-- OpenAI-compatible `/audio/transcriptions`
+- official OpenAI `/audio/transcriptions`
 - env-backed API key transport
 - deterministic fallback mode for tests
 
@@ -145,8 +145,9 @@ python -m pip install -e ".[openai-realtime]"
 ```
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT=low

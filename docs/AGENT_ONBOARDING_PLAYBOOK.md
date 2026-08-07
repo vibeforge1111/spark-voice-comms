@@ -76,9 +76,9 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.sp
 Recommend this when the user wants better quality and simpler production behavior.
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TRANSCRIBE_PROVIDER=openai
-VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_TRANSCRIBE_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 
 ELEVENLABS_API_KEY=<your ElevenLabs API key>
@@ -90,7 +90,8 @@ For a more voice-agent-like hosted path, use GPT Realtime 2:
 
 ```text
 VOICE_TTS_PROVIDER=openai-realtime
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
+VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 ```

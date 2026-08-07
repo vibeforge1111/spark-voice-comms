@@ -125,14 +125,14 @@ Tradeoffs:
 
 ## Paid / Hosted Options
 
-### STT: OpenAI-compatible transcriptions
+### STT: official OpenAI transcriptions
 
-The chip targets an OpenAI-compatible `/audio/transcriptions` endpoint for hosted STT.
+The credential-bearing hosted path is restricted to the official `api.openai.com` `/audio/transcriptions` endpoint.
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TRANSCRIBE_PROVIDER=openai
-VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_TRANSCRIBE_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 ```
 
@@ -178,8 +178,9 @@ python -m pip install -e ".[openai-realtime]"
 Configure secrets locally, not in Telegram:
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 VOICE_TTS_OPENAI_REALTIME_REASONING_EFFORT=low
