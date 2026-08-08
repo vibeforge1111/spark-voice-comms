@@ -33,8 +33,8 @@ For OpenAI GPT Realtime 2:
 
 ```text
 VOICE_TTS_PROVIDER=openai-realtime
-OPENAI_API_KEY=
-VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_OPENAI_API_KEY=
+VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 ```
@@ -49,7 +49,7 @@ VOICE_TTS_KOKORO_VOICES_PATH=
 
 Kokoro model files follow the same containment rule. Keep them under the voice checkout, `SPARK_HOME`, or `~/.spark`; otherwise set `SPARK_VOICE_ASSET_ROOT` to the narrow model directory. Do not point the hook at a broad home or temporary directory.
 
-Only `OPENAI_API_KEY` and `ELEVENLABS_API_KEY` are accepted as provider secret references by default. A deliberate custom provider can add comma-separated environment-variable names through `SPARK_VOICE_ALLOWED_SECRET_REFS`; configure that locally, never through a Telegram payload.
+Spark-managed installs store `voice.openai.api_key` in the supported secret backend and expose it to this chip as `VOICE_OPENAI_API_KEY`. Standalone deployments may continue to use `OPENAI_API_KEY` for backward compatibility. Those two names and `ELEVENLABS_API_KEY` are accepted as provider secret references by default. A deliberate custom provider can add comma-separated environment-variable names through `SPARK_VOICE_ALLOWED_SECRET_REFS`; configure that locally, never through a Telegram payload.
 
 MiniMax and Z.ai slots may be present in env templates, but they should remain planned-provider slots until dedicated adapters and smoke tests land.
 

@@ -19,6 +19,19 @@ def test_manifest_version_matches_package_version() -> None:
     assert manifest["module"]["version"] == package["project"]["version"]
 
 
+def test_manifest_declares_dedicated_managed_openai_voice_secret() -> None:
+    manifest = tomllib.loads(Path("spark.toml").read_text(encoding="utf-8"))
+
+    assert "voice.openai.api_key" in manifest["needs"]["secrets"]
+    assert "voice.openai.api_key" in manifest["claims"]["secrets"]
+    assert manifest["secrets"]["voice_openai_api_key"] == {
+        "prompt": "Optional OpenAI API key for hosted Spark voice STT and Realtime TTS",
+        "required": False,
+        "storage": "keychain",
+        "env_var": "VOICE_OPENAI_API_KEY",
+    }
+
+
 def test_realtime_fallback_audio_emits_debug_evidence(
     caplog,
 ) -> None:

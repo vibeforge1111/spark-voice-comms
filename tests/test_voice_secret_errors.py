@@ -10,7 +10,12 @@ from voice_comms_chip.spark_hook import (
     _resolve_tts_request,
 )
 
-SECRET_ENV_MARKERS = ("OPENAI_API_KEY", "ELEVENLABS_API_KEY", "CUSTOM_VOICE_SECRET")
+SECRET_ENV_MARKERS = (
+    "OPENAI_API_KEY",
+    "VOICE_OPENAI_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "CUSTOM_VOICE_SECRET",
+)
 
 
 def _assert_no_secret_env_leak(message: str) -> None:
@@ -48,6 +53,7 @@ def test_dedicated_transcription_provider_missing_secret_does_not_leak_default_r
     env_file = tmp_path / ".env"
     env_file.write_text("VOICE_TRANSCRIBE_PROVIDER=openai\n", encoding="utf-8")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("VOICE_OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError) as exc_info:
         _resolve_dedicated_transcription_provider({"builder_env_file_path": str(env_file)})
@@ -82,6 +88,7 @@ def test_resolve_openai_realtime_tts_missing_secret_does_not_leak_env_ref(tmp_pa
     env_file = tmp_path / ".env"
     env_file.write_text("VOICE_TTS_PROVIDER=openai-realtime\n", encoding="utf-8")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("VOICE_OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError) as exc_info:
         _resolve_openai_realtime_tts_request(

@@ -102,9 +102,9 @@ python -m spark_intelligence.cli attachments run-hook spark-voice-comms voice.sp
 Local faster-whisper STT is preferred for transcription when installed, so Telegram voice notes do not require OpenAI transcription spend by default. Use the hosted STT settings below only when paid transcription is intentional. Do not paste real keys into Telegram chat.
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TRANSCRIBE_PROVIDER=openai
-VOICE_TRANSCRIBE_SECRET_ENV_REF=OPENAI_API_KEY
+VOICE_TRANSCRIBE_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TRANSCRIBE_BASE_URL=https://api.openai.com/v1
 
 ELEVENLABS_API_KEY=<your ElevenLabs API key>
@@ -119,8 +119,9 @@ python -m pip install -e ".[openai-realtime]"
 ```
 
 ```text
-OPENAI_API_KEY=<your OpenAI API key>
+VOICE_OPENAI_API_KEY=<your OpenAI API key>
 VOICE_TTS_PROVIDER=openai-realtime
+VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF=VOICE_OPENAI_API_KEY
 VOICE_TTS_OPENAI_REALTIME_MODEL_ID=gpt-realtime-2
 VOICE_TTS_OPENAI_REALTIME_VOICE=coral
 ```

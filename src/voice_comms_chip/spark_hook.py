@@ -75,6 +75,7 @@ ENV_KOKORO_VOICE = "VOICE_TTS_KOKORO_VOICE"
 ENV_KOKORO_SPEED = "VOICE_TTS_KOKORO_SPEED"
 ENV_KOKORO_LANG = "VOICE_TTS_KOKORO_LANG"
 ENV_OPENAI_REALTIME_SECRET_REF = "VOICE_TTS_OPENAI_REALTIME_SECRET_ENV_REF"
+ENV_OPENAI_VOICE_API_KEY = "VOICE_OPENAI_API_KEY"
 ENV_OPENAI_REALTIME_WS_URL = "VOICE_TTS_OPENAI_REALTIME_WS_URL"
 ENV_OPENAI_REALTIME_MODEL_ID = "VOICE_TTS_OPENAI_REALTIME_MODEL_ID"
 ENV_OPENAI_REALTIME_VOICE = "VOICE_TTS_OPENAI_REALTIME_VOICE"
@@ -100,6 +101,7 @@ DEFAULT_KOKORO_LANG = "en-us"
 VOICE_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VOICE_ENV_KEYS = {
     "OPENAI_API_KEY",
+    ENV_OPENAI_VOICE_API_KEY,
     "VOICE_TRANSCRIBE_PROVIDER",
     "VOICE_TRANSCRIBE_BASE_URL",
     "VOICE_TRANSCRIBE_SECRET_ENV_REF",
@@ -129,7 +131,7 @@ VOICE_ENV_KEYS = {
     ENV_OPENAI_REALTIME_INSTRUCTIONS,
     ENV_OPENAI_REALTIME_TIMEOUT_SECONDS,
 }
-VOICE_SECRET_ENV_KEYS = frozenset({"OPENAI_API_KEY", "ELEVENLABS_API_KEY"})
+VOICE_SECRET_ENV_KEYS = frozenset({"OPENAI_API_KEY", ENV_OPENAI_VOICE_API_KEY, "ELEVENLABS_API_KEY"})
 
 
 class _PublicHookInputError(ValueError):
@@ -1248,7 +1250,11 @@ def _build_onboarding_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     local_stt_ready = _local_faster_whisper_available()
     local_tts_status = _local_tts_status(env_map=env_map)
     local_tts_ready = local_tts_status["ready"]
-    paid_stt_ready = bool(env_map.get("OPENAI_API_KEY") or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF"))
+    paid_stt_ready = bool(
+        env_map.get(ENV_OPENAI_VOICE_API_KEY)
+        or env_map.get("OPENAI_API_KEY")
+        or env_map.get("VOICE_TRANSCRIBE_SECRET_ENV_REF")
+    )
     paid_tts_status = _paid_tts_status(env_map=env_map)
     paid_tts_ready = paid_tts_status["ready"]
     return {
@@ -1323,7 +1329,7 @@ def _paid_tts_status(*, env_map: dict[str, str]) -> dict[str, Any]:
             "provider": "elevenlabs",
             "status": "configured for ElevenLabs TTS",
         }
-    openai_secret_ref = env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY"
+    openai_secret_ref = env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or _default_openai_voice_secret_env_ref(env_map)
     openai_realtime_selected = str(env_map.get(ENV_TTS_PROVIDER) or "").strip().lower() in OPENAI_REALTIME_PROVIDER_ALIASES
     if openai_realtime_selected and env_map.get(openai_secret_ref):
         return {
@@ -1443,6 +1449,13 @@ def _allowed_voice_secret_env_keys() -> frozenset[str]:
     return frozenset({*VOICE_SECRET_ENV_KEYS, *additions})
 
 
+def _default_openai_voice_secret_env_ref(env_map: dict[str, str]) -> str:
+    """Prefer Spark's dedicated Voice key while retaining standalone compatibility."""
+    if env_map.get(ENV_OPENAI_VOICE_API_KEY):
+        return ENV_OPENAI_VOICE_API_KEY
+    return "OPENAI_API_KEY"
+
+
 def _validated_voice_secret_env_ref(value: str, *, context: str) -> str:
     secret_env_ref = str(value or "").strip()
     if secret_env_ref not in _allowed_voice_secret_env_keys():
@@ -1534,7 +1547,7 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
                 "local-faster-whisper, builder, provider, configured-provider."
             )
         resolved_secret_env_ref = _validated_voice_secret_env_ref(
-            secret_env_ref or "OPENAI_API_KEY",
+            secret_env_ref or _default_openai_voice_secret_env_ref(env_map),
             context="Voice transcription",
         )
         secret_value = env_map.get(resolved_secret_env_ref)
@@ -1553,7 +1566,8 @@ def _resolve_dedicated_transcription_provider(payload: dict[str, Any]) -> dict[s
             "base_url": resolved_base_url,
             "secret_value": str(secret_value).strip(),
         }
-    openai_key = str(env_map.get("OPENAI_API_KEY") or "").strip()
+    openai_secret_ref = _default_openai_voice_secret_env_ref(env_map)
+    openai_key = str(env_map.get(openai_secret_ref) or "").strip()
     if openai_key:
         return {
             "provider_id": "openai",
@@ -1932,7 +1946,11 @@ def _resolve_openai_realtime_tts_request(
     text: str,
     surface: str,
 ) -> dict[str, Any]:
-    secret_env_ref = str(tts.get("secret_env_ref") or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF) or "OPENAI_API_KEY").strip()
+    secret_env_ref = str(
+        tts.get("secret_env_ref")
+        or env_map.get(ENV_OPENAI_REALTIME_SECRET_REF)
+        or _default_openai_voice_secret_env_ref(env_map)
+    ).strip()
     if not secret_env_ref:
         raise ValueError(_missing_voice_secret_message("voice.speak OpenAI Realtime"))
     secret_env_ref = _validated_voice_secret_env_ref(
