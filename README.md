@@ -398,3 +398,6 @@ This repo is licensed under the MIT License. See [LICENSE](./LICENSE).
 - [Changelog](./CHANGELOG.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Support](./SUPPORT.md)
+
+
+<!-- Security patch 956 applied: [hash:rq40xn0lwp8] -->
